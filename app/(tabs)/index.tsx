@@ -1,98 +1,121 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View as ViewComponent, StatusBar } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Header from '../../components/Header';
+import Feed from '../../components/Feed';
+import BottomNav from '../../components/BottomNav';
+import UploadModal from '../../components/UploadModal';
+import Explore from '../../components/Explore';
+import LogoutConfirmModal from '../../components/LogoutConfirmModal';
+import Toast from '../../components/Toast';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export type ViewType = 'feed' | 'explore';
 
-export default function HomeScreen() {
+export interface Flyer {
+  id: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  // Add other properties as needed
+}
+
+function App() {
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [flyers, setFlyers] = useState<Flyer[]>([]);
+  const [activeView, setActiveView] = useState<ViewType>('feed');
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleOpenUpload = () => setIsUploadModalOpen(true);
+  const handleCloseUpload = () => setIsUploadModalOpen(false);
+
+  const handleLogoutClick = () => setIsLogoutModalOpen(true);
+  const handleCloseLogoutModal = () => setIsLogoutModalOpen(false);
+  const handleConfirmLogout = () => {
+    setIsLogoutModalOpen(false);
+    showToast('Logged out successfully');
+  };
+
+  const handleUploadSuccess = (newFlyer: Flyer) => {
+    setFlyers(prev => [newFlyer, ...prev]);
+    handleCloseUpload();
+    setActiveView('feed');
+  };
+
+  const handleToggleSearch = (active: boolean) => {
+    setIsSearchActive(active);
+    if (active) {
+      setActiveView('explore');
+    }
+    if (!active) {
+      setSearchTerm('');
+    }
+  };
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3000);
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <GestureHandlerRootView style={styles.gestureHandler}>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="light-content" backgroundColor="#1c1917" />
+        <ViewComponent style={styles.container}>
+          <Header 
+            onUploadClick={handleOpenUpload}
+            onLogoutClick={handleLogoutClick}
+            isSearchActive={isSearchActive}
+            searchTerm={searchTerm}
+            onToggleSearch={handleToggleSearch}
+            onSearchTermChange={setSearchTerm}
+          />
+          <ViewComponent style={styles.main}>
+            {activeView === 'feed' && <Feed initialFlyers={flyers} showToast={showToast} />}
+            {activeView === 'explore' && <Explore searchTerm={searchTerm} />}
+          </ViewComponent>
+            <BottomNav activeView={activeView} setView={setActiveView} /> 
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+          <UploadModal 
+            visible={isUploadModalOpen} 
+            onClose={handleCloseUpload} 
+            onUploadSuccess={handleUploadSuccess} 
+          />
+          <LogoutConfirmModal 
+            visible={isLogoutModalOpen} 
+            onClose={handleCloseLogoutModal} 
+            onConfirm={handleConfirmLogout} 
+          />
+          <Toast message={toastMessage} />
+        </ViewComponent>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  gestureHandler: {
+    flex: 1,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#1c1917', // stone-950
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  container: {
+    flex: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#292524', // stone-800
+  },
+  main: {
+    flex: 1,
+    overflow: 'hidden',
   },
 });
+
+export default App;

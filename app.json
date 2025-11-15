@@ -18,6 +18,10 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "ios": {
+      "supportsTablet": true,
+      "backgroundColor": "#1c1917"
+    },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
