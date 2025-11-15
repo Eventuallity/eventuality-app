@@ -10,8 +10,11 @@ import Explore from '../../components/Explore';
 import LogoutConfirmModal from '../../components/LogoutConfirmModal';
 import Toast from '../../components/Toast';
 import { Flyer } from '../.././types';
+import { useRouter } from 'expo-router';
 
 export type ViewType = 'feed' | 'explore';
+
+const router = useRouter();
 
 function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -30,6 +33,9 @@ function App() {
   const handleConfirmLogout = () => {
     setIsLogoutModalOpen(false);
     showToast('Logged out successfully');
+    setTimeout(() => {
+    router.replace('/login');
+  }, 1000);
   };
 
   const handleUploadSuccess = (newFlyer: Flyer) => {
