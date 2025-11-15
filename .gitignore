@@ -45,3 +45,5 @@ app-example
 # venv files 
 venv/
 package-lock.json
+venv/package-lock.json
+.env
