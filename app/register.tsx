@@ -39,8 +39,7 @@ const Register = () => {
           data: {
             name: name.trim(),
           },
-          // If you have email confirmations enabled:
-          // emailRedirectTo: 'yourapp://auth-callback'
+          emailRedirectTo: 'https://eventuality-verified.vercel.app/'
         },
       });
 
