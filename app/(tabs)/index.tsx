@@ -11,12 +11,14 @@ import LogoutConfirmModal from '../../components/LogoutConfirmModal';
 import Toast from '../../components/Toast';
 import { Flyer } from '../.././types';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../auth-context';   // ⬅️ add this line
 
 export type ViewType = 'feed' | 'explore';
 
 const router = useRouter();
 
 function App() {
+  const { user, signOut } = useAuth();        // ⬅️ access current user + signOut
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [flyers, setFlyers] = useState<Flyer[]>([]);
@@ -30,12 +32,21 @@ function App() {
 
   const handleLogoutClick = () => setIsLogoutModalOpen(true);
   const handleCloseLogoutModal = () => setIsLogoutModalOpen(false);
-  const handleConfirmLogout = () => {
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3000);
+  };
+
+  const handleConfirmLogout = async () => {
     setIsLogoutModalOpen(false);
+    await signOut();                    // ⬅️ log out from Supabase
     showToast('Logged out successfully');
     setTimeout(() => {
-    router.replace('/login');
-  }, 1000);
+      router.replace('/login');
+    }, 1000);
   };
 
   const handleUploadSuccess = (newFlyer: Flyer) => {
@@ -52,13 +63,6 @@ function App() {
     if (!active) {
       setSearchTerm('');
     }
-  };
-
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
   };
 
   return (
@@ -78,7 +82,7 @@ function App() {
             {activeView === 'feed' && <Feed initialFlyers={flyers} showToast={showToast} />}
             {activeView === 'explore' && <Explore searchTerm={searchTerm} />}
           </ViewComponent>
-            <BottomNav activeView={activeView} setView={setActiveView} /> 
+          <BottomNav activeView={activeView} setView={setActiveView} /> 
 
           <UploadModal 
             visible={isUploadModalOpen} 
