@@ -9,16 +9,9 @@ import UploadModal from '../../components/UploadModal';
 import Explore from '../../components/Explore';
 import LogoutConfirmModal from '../../components/LogoutConfirmModal';
 import Toast from '../../components/Toast';
+import { Flyer } from '../.././types';
 
 export type ViewType = 'feed' | 'explore';
-
-export interface Flyer {
-  id: string;
-  title: string;
-  description?: string;
-  imageUrl?: string;
-  // Add other properties as needed
-}
 
 function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
