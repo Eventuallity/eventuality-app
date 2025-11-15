@@ -1,7 +1,10 @@
+
+
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import Icon from '../../components/Icon';
+import { supabase } from '../../supabase-client';
 
 const Register = () => {
   const router = useRouter();
@@ -11,6 +14,7 @@ const Register = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+// ...existing code...
   const onSubmit = async () => {
     if (!name || !email || !password || !confirmPassword) {
       Alert.alert('Sign Up', 'Please fill in all fields');
@@ -27,37 +31,39 @@ const Register = () => {
       return;
     }
 
-    setLoading(true);
-    
-    // Simulating registration - replace with your Supabase logic
-    setTimeout(() => {
-      setLoading(false);
-      Alert.alert('Success', 'Account created successfully!', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)') }
-      ]);
-    }, 1500);
+    try {
+      setLoading(true);
 
-    /* 
-    // Replace the setTimeout above with your actual Supabase registration:
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password: password.trim(),
-      options: {
-        data: {
-          name: name.trim(),
-        }
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: password.trim(),
+        options: {
+          data: {
+            name: name.trim(),
+          },
+          // If you have email confirmations enabled:
+          // emailRedirectTo: 'yourapp://auth-callback'
+        },
+      });
+
+      setLoading(false);
+
+      if (error) {
+        Alert.alert('Sign Up', error.message);
+        return;
       }
-    });
-    setLoading(false);
-    if (error) {
-      Alert.alert('Sign Up', error.message);
-    } else {
+
+      // If you require email verification, you might want a different message:
+      // e.g. "Check your email for a confirmation link"
       Alert.alert('Success', 'Account created successfully!', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)') }
+        { text: 'OK', onPress: () => router.replace('/(tabs)') },
       ]);
+    } catch (err: any) {
+      setLoading(false);
+      Alert.alert('Sign Up', err?.message ?? 'Something went wrong');
     }
-    */
   };
+// ...existing code...
 
   return (
     <ScrollView 

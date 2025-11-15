@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import Icon from '../../components/Icon';
+import { supabase } from '../../supabase-client';
 
 const Login = () => {
   const router = useRouter();
@@ -15,30 +16,29 @@ const Login = () => {
       return;
     }
 
-    setLoading(true);
-    
-    // Simulating authentication - replace with your Supabase logic
-    setTimeout(() => {
+    try {
+      setLoading(true);
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password.trim(),
+      });
+
       setLoading(false);
-      // On success, navigate to main app
-      router.replace('/(tabs)');
-    }, 1500);
 
-    /* 
-    // Replace the setTimeout above with your actual Supabase authentication:
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: password.trim(),
-    });
-    setLoading(false);
-    if (error) {
-      Alert.alert('Login', error.message);
-    } else {
+      if (error) {
+        Alert.alert('Login', error.message);
+        return;
+      }
+
+      // On success, go to main tabs
       router.replace('/(tabs)');
+    } catch (err: any) {
+      setLoading(false);
+      Alert.alert('Login', err?.message ?? 'Something went wrong');
     }
-    */
   };
-
+  
   return (
     <View style={styles.container}>
       {/* Header with Logo */}
