@@ -1,10 +1,9 @@
 
-
-import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import Icon from '../../components/Icon';
-import { supabase } from '../../supabase-client';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Icon from '../components/Icon';
+import { supabase } from '../supabase-client';
 
 const Register = () => {
   const router = useRouter();
@@ -14,7 +13,6 @@ const Register = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-// ...existing code...
   const onSubmit = async () => {
     if (!name || !email || !password || !confirmPassword) {
       Alert.alert('Sign Up', 'Please fill in all fields');
@@ -55,7 +53,7 @@ const Register = () => {
 
       // If you require email verification, you might want a different message:
       // e.g. "Check your email for a confirmation link"
-      Alert.alert('Success', 'Account created successfully!', [
+      Alert.alert('Success', 'Account created successfully! Check your email for a confirmation link.', [
         { text: 'OK', onPress: () => router.replace('/(tabs)') },
       ]);
     } catch (err: any) {

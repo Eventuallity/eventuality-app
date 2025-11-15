@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import Icon from '../../components/Icon';
-import { supabase } from '../../supabase-client';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { supabase } from '../supabase-client';
 
 const Login = () => {
   const router = useRouter();
