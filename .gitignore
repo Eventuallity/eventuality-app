@@ -43,5 +43,5 @@ app-example
 /android
 
 # venv files 
-package-lock.json
 venv/
+package-lock.json
