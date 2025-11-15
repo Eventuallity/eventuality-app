@@ -13,6 +13,7 @@ const Register = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const rochesterEmailRegex = /^[A-Za-z0-9._%+-]+@(u\.rochester\.edu|ur\.rochester\.edu|rochester\.edu)$/;
 
 // ...existing code...
   const onSubmit = async () => {
@@ -31,6 +32,10 @@ const Register = () => {
       return;
     }
 
+    if (!rochesterEmailRegex.test(email.trim())) {
+      Alert.alert('Sign Up', 'Please use a valid University of Rochester email address');
+      return;
+    }
     try {
       setLoading(true);
 
