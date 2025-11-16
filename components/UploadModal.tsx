@@ -16,6 +16,7 @@ import { CATEGORIES } from '.././constants';
 import Icon from './Icon';
 import * as DocumentPicker from 'expo-document-picker';
 import { Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../supabase-client';
 
 interface UploadModalProps {
@@ -88,6 +89,15 @@ const CategorySelector: React.FC<{
     </View>
   );
 };
+
+type SelectedAsset = {
+  uri: string;
+  name?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+};
+
+const FALLBACK_IMAGE_NAME = 'poster.jpg';
 
 const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuccess }) => {
   const [step, setStep] = useState<UploadStep>('select');
@@ -193,39 +203,85 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
     }
   };
 
-  const handleFileSelect = async () => {
-    setError(null);
+  const sanitizeFileName = (raw: string) => {
+    return raw.replace(/[^a-zA-Z0-9._-]/g, '_');
+  };
 
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['application/pdf'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
+  const guessExtensionForMime = (mime?: string | null) => {
+    if (!mime) return 'bin';
+    if (mime === 'application/pdf') return 'pdf';
+    if (mime === 'image/png') return 'png';
+    if (mime === 'image/webp') return 'webp';
+    if (mime === 'image/heic') return 'heic';
+    if (mime === 'image/heif') return 'heif';
+    if (mime === 'image/jpeg') return 'jpg';
+    if (mime.startsWith('image/')) return mime.split('/')[1];
+    return 'bin';
+  };
 
-    if (result.canceled || !result.assets || result.assets.length === 0) {
-      return;
+  const getDisplayName = (asset: SelectedAsset) => {
+    const base = asset.name ?? asset.fileName ?? asset.uri.split('/').pop() ?? 'event-flyer';
+    if (base.includes('.')) {
+      return base;
     }
+    const extension = guessExtensionForMime(asset.mimeType);
+    return `${base}.${extension}`;
+  };
 
-    const asset = result.assets[0];
-    setFileName(asset.name ?? 'flyer.pdf');
+  const ensureCameraPermission = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Camera permission needed',
+        'Please grant camera access to scan a poster.'
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const processSelectedAsset = async (asset: SelectedAsset) => {
+    setError(null);
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+
+    const displayName = getDisplayName(asset);
+    const sanitizedName = sanitizeFileName(displayName);
+    const contentType = asset.mimeType
+      ?? (displayName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
+        : displayName.match(/\.png$/i)
+          ? 'image/png'
+          : displayName.match(/\.jpe?g$/i)
+            ? 'image/jpeg'
+            : displayName.match(/\.webp$/i)
+              ? 'image/webp'
+              : 'application/octet-stream');
+
+    setFileName(displayName);
     setFileUri(asset.uri);
 
     try {
       setStep('processing');
+      setStorageUrl(null);
 
-      // Upload to Supabase Storage
-      const pdfBytes = await fetch(asset.uri).then(res => res.arrayBuffer());
-      const filePath = `flyers/${Date.now()}-${asset.name ?? 'flyer.pdf'}`;
+      const response = await fetch(asset.uri);
+      if (!response.ok) {
+        throw new Error('Unable to access selected file');
+      }
+      const fileBytes = await response.arrayBuffer();
+
+      const filePath = `flyers/${Date.now()}-${sanitizedName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('flyers')
-        .upload(filePath, pdfBytes, {
-          contentType: 'application/pdf',
+        .upload(filePath, fileBytes, {
+          contentType,
           upsert: false,
         });
 
       if (uploadError) {
-        throw uploadError;
+        throw new Error(uploadError.message ?? 'Failed to upload file');
       }
 
       const { data: publicUrlData } = supabase.storage
@@ -235,16 +291,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       const publicUrl = publicUrlData?.publicUrl ?? null;
       setStorageUrl(publicUrl);
 
-      // Pre-fill title from filename
-      const inferredTitle = (asset.name ?? 'Untitled Event').replace(/\.[^/.]+$/, '');
+      const inferredTitle = displayName.replace(/\.[^/.]+$/, '') || 'Untitled Event';
 
       let parsedDetails: Partial<Flyer> | null = null;
       if (publicUrl) {
-        parsedDetails = await parseFlyerWithGemini(publicUrl, asset.name ?? null);
+        parsedDetails = await parseFlyerWithGemini(publicUrl, displayName ?? null);
       }
 
       const primaryCategory = parsedDetails?.category ?? Category.ACADEMIC;
-      const nextCategoriesRaw = (parsedDetails?.categories && parsedDetails.categories.length)
+      const nextCategoriesRaw = parsedDetails?.categories?.length
         ? parsedDetails.categories
         : [primaryCategory];
       let nextCategories = Array.from(new Set(nextCategoriesRaw.filter(Boolean))) as Category[];
@@ -265,6 +320,16 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
 
       setExtractedData(mergedDetails);
       setSelectedCategories(nextCategories);
+      const nextTempDate = (() => {
+        if (mergedDetails.eventDate) {
+          const next = new Date(mergedDetails.eventDate);
+          if (!isNaN(next.getTime())) {
+            return next;
+          }
+        }
+        return new Date();
+      })();
+      setTempDate(nextTempDate);
       setStep('confirm');
     } catch (err: any) {
       console.error('Upload or parsing failed', err);
@@ -272,6 +337,56 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       Alert.alert('Upload error', err?.message ?? 'Failed to upload or parse flyer');
       setStep('select');
     }
+  };
+
+  const handleFileSelect = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/*'],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    await processSelectedAsset({
+      uri: asset.uri,
+      name: asset.name,
+      mimeType: asset.mimeType ?? undefined,
+    });
+  };
+
+  const handleScanPoster = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not supported on web', 'Scanning posters is only available on mobile.');
+      return;
+    }
+
+    const hasPermission = await ensureCameraPermission();
+    if (!hasPermission) {
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 1,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    const name = asset.fileName ?? asset.uri.split('/').pop() ?? FALLBACK_IMAGE_NAME;
+    await processSelectedAsset({
+      uri: asset.uri,
+      name,
+      fileName: name,
+      mimeType: asset.mimeType ?? 'image/jpeg',
+    });
   };
 
   const isFutureDate = (iso: string | undefined): boolean => {
@@ -386,11 +501,19 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
         return (
           <View style={styles.centerContent}>
             <Text style={styles.title}>Upload a Flyer</Text>
-            <Text style={styles.subtitle}>Upload a PDF or image of an event flyer.</Text>
-            <Pressable onPress={handleFileSelect} style={styles.button}>
-              <Icon name="upload" className="w-6 h-6" color="white" />
-              <Text style={styles.buttonText}>Select File</Text>
-            </Pressable>
+            <Text style={styles.subtitle}>Scan a poster with your camera or upload a PDF/image.</Text>
+            <View style={styles.actionButtons}>
+              {Platform.OS !== 'web' && (
+                <Pressable onPress={handleScanPoster} style={styles.button}>
+                  <Icon name="camera" className="w-6 h-6" color="white" />
+                  <Text style={styles.buttonText}>Scan Poster</Text>
+                </Pressable>
+              )}
+              <Pressable onPress={handleFileSelect} style={styles.button}>
+                <Icon name="upload" className="w-6 h-6" color="white" />
+                <Text style={styles.buttonText}>Upload From Files</Text>
+              </Pressable>
+            </View>
           </View>
         );
       case 'processing':
@@ -569,9 +692,9 @@ const styles = StyleSheet.create({
         right: 16,
         zIndex: 10,
     },
-    centerContent: { alignItems: 'center', justifyContent: 'center' },
+    centerContent: { alignItems: 'center', justifyContent: 'center', width: '100%' },
     title: { fontSize: 24, fontWeight: 'bold', color: '#f5f5f4', marginBottom: 16 },
-    subtitle: { color: '#a8a29e', marginBottom: 32, textAlign: 'center' },
+    subtitle: { color: '#a8a29e', marginBottom: 24, textAlign: 'center', paddingHorizontal: 8 },
     button: { width: '100%', backgroundColor: '#9333ea', paddingVertical: 12, borderRadius: 8, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
     buttonText: { color: 'white', fontWeight: 'bold' },
     fileName: { color: '#78716c', marginTop: 16 },
@@ -621,6 +744,11 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(168, 85, 247, 0.2)',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    actionButtons: {
+      width: '100%',
+      gap: 12,
+      display: 'flex',
     },
 });
 

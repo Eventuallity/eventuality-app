@@ -20,6 +20,7 @@ const ICONS: { [key: string]: string } = {
   upload: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5",
   check: "M4.5 12.75l6 6 9-13.5",
   logout: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
+  camera: "M4 7a2 2 0 012-2h1.5l.894-1.789A2 2 0 0110.236 2h3.528a2 2 0 011.842 1.211L16.5 5H18a2 2 0 012 2v8a3 3 0 01-3 3H7a3 3 0 01-3-3V7zm8 9a4 4 0 100-8 4 4 0 000 8z",
 };
 
 // A simple utility to parse Tailwind-like size classes (e.g., 'w-6 h-6')
