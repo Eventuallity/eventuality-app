@@ -210,6 +210,7 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
         mimeType,
         dialogTitle: `Share ${flyer.title || 'Event Flyer'}`,
         UTI: uti,
+        message: `Look at the event I just found in Eventuality! ${flyer.title ? `\n\n${flyer.title}` : ''}`,
       });
     } catch (err) {
       console.error('Failed to share flyer', err);
