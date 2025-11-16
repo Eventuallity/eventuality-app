@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { Flyer } from '.././types';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { MOCK_FLYERS } from '.././constants';
+import { Flyer } from '.././types';
+import { addEventToCalendar } from '../utils/calendar';
 import FlyerCard from './FlyerCard';
 
 interface FeedProps {
   initialFlyers: Flyer[];
   showToast: (message: string) => void;
+  addedEventIds: Set<string>;
+  onEventAdded: (flyerId: string) => void;
 }
 
-const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast }) => {
+const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, onEventAdded }) => {
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -21,9 +24,28 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast }) => {
     setCurrentIndex(0);
   }, [initialFlyers]);
 
-  const handleSwipe = (direction: 'right' | 'left') => {
+  const handleSwipe = async (direction: 'right' | 'left') => {
     if (direction === 'right') {
-      showToast('Added to calendar');
+      const currentFlyer = flyers[currentIndex];
+      
+      // Calculate end date (assume 2 hours after start)
+      const startDate = new Date(currentFlyer.eventDate);
+      const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
+      
+      const success = await addEventToCalendar({
+        title: currentFlyer.title,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        location: currentFlyer.location,
+        description: currentFlyer.description
+      });
+      
+      if (success) {
+        onEventAdded(currentFlyer.id);
+        showToast('Added to calendar');
+      } else {
+        showToast('Failed to add to calendar');
+      }
     }
     setCurrentIndex((prevIndex) => (prevIndex + 1) % flyers.length);
   };
@@ -40,7 +62,7 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast }) => {
     <View style={styles.container}>
       <View style={styles.cardContainer}>
         {flyers.map((flyer, index) => {
-          if (index < currentIndex) return null; // Don't render swiped cards
+          if (index < currentIndex) return null;
           return (
             <FlyerCard
               key={flyer.id}
@@ -49,7 +71,7 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast }) => {
               onSwipe={handleSwipe}
             />
           );
-        }).reverse() /* Reverse to stack them correctly */}
+        }).reverse()}
       </View>
     </View>
   );
@@ -63,7 +85,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#78716c', // stone-500
+    color: '#78716c',
   },
   container: {
     flex: 1,

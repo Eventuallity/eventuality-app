@@ -1,17 +1,56 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, Pressable, Modal } from 'react-native';
-import { Flyer, Category } from '.././types';
-import { MOCK_FLYERS } from '.././constants';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { MOCK_FLYERS } from '../constants';
+import { Category, Flyer } from '../types';
+import { addEventToCalendar } from '../utils/calendar';
 import FilterBar from './FilterBar';
 import Icon from './Icon';
 
-const FlyerListItem: React.FC<{ flyer: Flyer; onImageClick: (imageUrl: string) => void }> = ({ flyer, onImageClick }) => {
-  const [isAdded, setIsAdded] = useState(false);
+const FlyerListItem: React.FC<{ 
+  flyer: Flyer; 
+  onImageClick: (imageUrl: string) => void;
+  onShowToast: (message: string) => void;
+  isAdded: boolean;
+  onToggleAdded: (flyerId: string, newState: boolean) => void;
+}> = ({ flyer, onImageClick, onShowToast, isAdded, onToggleAdded }) => {
   const [addCount, setAddCount] = useState(flyer.likes);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleAdd = () => {
-    setIsAdded(prev => !prev);
-    setAddCount(prev => isAdded ? prev - 1 : prev + 1);
+  useEffect(() => {
+    // Update the count when isAdded changes externally
+    setAddCount(flyer.likes + (isAdded ? 1 : 0));
+  }, [isAdded, flyer.likes]);
+
+  const handleAdd = async () => {
+    if (isLoading) return;
+
+    if (!isAdded) {
+      setIsLoading(true);
+      
+      const startDate = new Date(flyer.eventDate);
+      const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
+      
+      const success = await addEventToCalendar({
+        title: flyer.title,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        location: flyer.location,
+        description: flyer.description
+      });
+      
+      setIsLoading(false);
+      
+      if (success) {
+        onToggleAdded(flyer.id, true);
+        setAddCount(prev => prev + 1);
+        onShowToast('Added to calendar');
+      } else {
+        onShowToast('Failed to add to calendar');
+      }
+    } else {
+      onToggleAdded(flyer.id, false);
+      setAddCount(prev => prev - 1);
+    }
   };
 
   const formattedDate = new Date(flyer.eventDate).toLocaleDateString('en-US', {
@@ -28,9 +67,23 @@ const FlyerListItem: React.FC<{ flyer: Flyer; onImageClick: (imageUrl: string) =
         <Text style={styles.itemTitle} numberOfLines={1}>{flyer.title}</Text>
         <Text style={styles.itemDate}>{formattedDate}</Text>
       </View>
-      <Pressable onPress={handleAdd} style={[styles.addButton, isAdded && styles.addedButton]}>
-        <Icon name="calendar" className="w-5 h-5" color={isAdded ? '#a855f7' : '#a8a29e'} />
-        <Text style={[styles.addCount, isAdded && styles.addedCount]}>{addCount}</Text>
+      <Pressable 
+        onPress={handleAdd}
+        disabled={isLoading}
+        style={[
+          styles.addButton, 
+          isAdded && styles.addedButton,
+          isLoading && styles.loadingButton
+        ]}
+      >
+        <Icon 
+          name="calendar" 
+          className="w-5 h-5" 
+          color={isAdded ? '#a855f7' : '#a8a29e'} 
+        />
+        <Text style={[styles.addCount, isAdded && styles.addedCount]}>
+          {isLoading ? '...' : addCount}
+        </Text>
       </Pressable>
     </View>
   );
@@ -38,9 +91,19 @@ const FlyerListItem: React.FC<{ flyer: Flyer; onImageClick: (imageUrl: string) =
 
 interface ExploreProps {
   searchTerm: string;
+  showToast: (message: string) => void;
+  addedEventIds: Set<string>;
+  onEventAdded: (flyerId: string) => void;
+  onEventRemoved: (flyerId: string) => void;
 }
 
-const Explore: React.FC<ExploreProps> = ({ searchTerm }) => {
+const Explore: React.FC<ExploreProps> = ({ 
+  searchTerm, 
+  showToast, 
+  addedEventIds, 
+  onEventAdded, 
+  onEventRemoved 
+}) => {
   const [flyers] = useState<Flyer[]>(MOCK_FLYERS);
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -59,18 +122,34 @@ const Explore: React.FC<ExploreProps> = ({ searchTerm }) => {
     return result;
   }, [flyers, selectedCategory, searchTerm]);
 
+  const handleToggleAdded = (flyerId: string, newState: boolean) => {
+    if (newState) {
+      onEventAdded(flyerId);
+    } else {
+      onEventRemoved(flyerId);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <FilterBar selectedCategory={selectedCategory} onSelectCategory={setSelectedCategory} />
       <FlatList
         data={filteredFlyers}
-        renderItem={({ item }) => <FlyerListItem flyer={item} onImageClick={setSelectedImage} />}
+        renderItem={({ item }) => (
+          <FlyerListItem 
+            flyer={item} 
+            onImageClick={setSelectedImage}
+            onShowToast={showToast}
+            isAdded={addedEventIds.has(item.id)}
+            onToggleAdded={handleToggleAdded}
+          />
+        )}
         keyExtractor={item => item.id}
         contentContainerStyle={{ paddingHorizontal: 16 }}
         ListEmptyComponent={() => (
-            <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No events found.</Text>
-            </View>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No events found.</Text>
+          </View>
         )}
       />
       
@@ -98,6 +177,7 @@ const styles = StyleSheet.create({
     itemDate: { color: '#a8a29e', fontSize: 14, marginTop: 4 },
     addButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: 80, height: 40, borderRadius: 9999, backgroundColor: 'rgba(41, 37, 36, 0.6)' },
     addedButton: { backgroundColor: 'rgba(168, 85, 247, 0.2)' },
+    loadingButton: { opacity: 0.6 },
     addCount: { color: '#a8a29e', fontSize: 14, fontWeight: 'bold' },
     addedCount: { color: '#a855f7' },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
