@@ -12,6 +12,21 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 const SUPPORTED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic', 'heif'];
 
+type UploadPdfRow = {
+  id: string | number;
+  title?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  image_id?: string | null;
+  date_and_time?: string | null;
+  categories?: string | null;
+  location?: string | null;
+  organization?: string | null;
+  created_at?: string | null;
+};
+
+const SUPABASE_CATEGORIES = Object.values(Category);
+
 const extractExtension = (urlOrName: string): string | null => {
   const cleaned = urlOrName.split('?')[0].split('#')[0];
   const segment = cleaned.split('/').pop() ?? cleaned;
@@ -62,6 +77,37 @@ const resolveUti = (extension: string | null): string | undefined => {
 
 const sanitizeFileBaseName = (raw: string): string => raw.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'eventuality_flyer';
 
+const parseCategories = (raw: string | null | undefined): Category[] => {
+  if (!raw) return [Category.OTHER];
+
+  const parsed = raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const match = SUPABASE_CATEGORIES.find(
+        category => category.toLowerCase() === part.toLowerCase()
+      );
+      return match ?? Category.OTHER;
+    });
+
+  const unique = Array.from(new Set(parsed));
+  return unique.length > 0 ? unique : [Category.OTHER];
+};
+
+const normalizeEventDate = (primary?: string | null, fallback?: string | null): string => {
+  const candidates = [primary, fallback].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    const parsed = new Date(candidate);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+};
+
 const FlyerListItem: React.FC<{ 
   flyer: Flyer; 
   onImageClick: (imageUrl: string) => void;
@@ -69,8 +115,8 @@ const FlyerListItem: React.FC<{
   onShowToast: (message: string) => void;
   isAdded: boolean;
   onToggleAdded: (flyerId: string, newState: boolean) => void;
+  userEmail?: string | null;
 }> = ({ flyer, onImageClick, onLongPressShare, onShowToast, isAdded, onToggleAdded, userEmail }) => {
-  //userEmail?: string | null;
   const [addCount, setAddCount] = useState(flyer.likes);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -183,50 +229,36 @@ const Explore: React.FC<ExploreProps> = ({
     setIsLoading(true);
     setErrorText(null);
     try {
-      const listAll = async (path: string): Promise<{ path: string; name: string; created_at?: string | null; updated_at?: string | null }[]> => {
-        const { data, error } = await supabase.storage
-          .from('flyers')
-          .list(path, { limit: 1000, sortBy: { column: 'name', order: 'asc' } });
-        if (error) throw error;
+      const { data, error } = await supabase
+        .from('upload_pdf')
+        .select('id, title, description, image_url, image_id, date_and_time, categories, location, organization, created_at')
+        .order('date_and_time', { ascending: true });
 
-        const collected: { path: string; name: string; created_at?: string | null; updated_at?: string | null }[] = [];
-        for (const item of data ?? []) {
-          const fullPath = path ? `${path}/${item.name}` : item.name;
-          const isFolder = !item.id && !item.metadata;
-          if (isFolder) {
-            collected.push(...(await listAll(fullPath)));
-          } else {
-            collected.push({ path: fullPath, name: item.name, created_at: item.created_at, updated_at: item.updated_at });
-          }
-        }
-        return collected;
-      };
+      if (error) throw error;
 
-      const files = await listAll('');
-
-      const mappedFlyers: Flyer[] = files
-        .filter(file => {
-          const ext = extractExtension(file.name);
-          return Boolean(ext && SUPPORTED_EXTENSIONS.includes(ext));
-        })
-        .map(file => {
-          const { data: publicUrlData } = supabase.storage.from('flyers').getPublicUrl(file.path);
-          const publicUrl = publicUrlData?.publicUrl;
-          if (!publicUrl) return null;
-
+      const mappedFlyers: Flyer[] = ((data ?? []) as UploadPdfRow[])
+        .filter((row): row is UploadPdfRow & { image_url: string } => Boolean(row.image_url))
+        .map(row => {
+          const parsedCategories = parseCategories(row.categories);
           return {
-            id: file.path,
-            title: file.name.replace(/\.[^/.]+$/, ''),
-            description: 'Flyer uploaded by the community.',
-            imageUrl: publicUrl,
-            eventDate: new Date(file.updated_at ?? file.created_at ?? Date.now()).toISOString(),
-            category: Category.OTHER,
+            id: String(row.id ?? row.image_id ?? row.image_url),
+            title: row.title?.trim() || 'Untitled Event',
+            description: row.description?.trim() || '',
+            imageUrl: row.image_url,
+            eventDate: normalizeEventDate(row.date_and_time, row.created_at),
+            category: parsedCategories[0],
+            categories: parsedCategories,
             likes: 0,
             dislikes: 0,
-            uploader: { id: 'supabase-storage', name: 'Supabase Storage' },
+            uploader: { id: 'supabase-upload', name: row.organization || 'Community' },
+            location: row.location ?? '',
+            organization: row.organization ?? '',
           };
         })
-        .filter((flyer): flyer is Flyer => Boolean(flyer));
+        .filter((flyer): flyer is Flyer => {
+          const ext = extractExtension(flyer.imageUrl);
+          return Boolean(!ext || SUPPORTED_EXTENSIONS.includes(ext));
+        });
 
       setFlyers(mappedFlyers);
     } catch (err) {
