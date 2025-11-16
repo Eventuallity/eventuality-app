@@ -10,19 +10,13 @@ import {
   View,
   Platform,
 } from 'react-native';
-// Platform Date/Time picker (community package). If you don't have it installed,
-// the code gracefully falls back to the existing text input.
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Category, Flyer } from '.././types';
+import { CATEGORIES } from '.././constants';
 import Icon from './Icon';
-
 import * as DocumentPicker from 'expo-document-picker';
 import { Alert } from 'react-native';
 import { supabase } from '../supabase-client';
-
-
-
-
 
 interface UploadModalProps {
   visible: boolean;
@@ -32,7 +26,41 @@ interface UploadModalProps {
 
 type UploadStep = 'select' | 'processing' | 'confirm' | 'success';
 
-// Gemini integration removed — parsing is done manually by user now.
+const CategorySelector: React.FC<{
+  selectedCategories: Category[];
+  onToggleCategory: (category: Category) => void;
+}> = ({ selectedCategories, onToggleCategory }) => {
+  return (
+    <View style={styles.categoryGrid}>
+      {CATEGORIES.map((category) => {
+        const isSelected = selectedCategories.includes(category);
+        return (
+          <Pressable
+            key={category}
+            onPress={() => onToggleCategory(category)}
+            style={({ pressed }) => [
+              styles.categoryChip,
+              isSelected && styles.categoryChipSelected,
+              pressed && styles.categoryChipPressed,
+            ]}
+          >
+            <Text style={[
+              styles.categoryChipText,
+              isSelected && styles.categoryChipTextSelected
+            ]}>
+              {category}
+            </Text>
+            {isSelected && (
+              <View style={styles.checkmark}>
+                <Icon name="check" className="w-4 h-4" color="#a855f7" />
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+};
 
 const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuccess }) => {
   const [step, setStep] = useState<UploadStep>('select');
@@ -40,6 +68,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
   const [fileUri, setFileUri] = useState<string | null>(null);
   const [storageUrl, setStorageUrl] = useState<string | null>(null);
   const [extractedData, setExtractedData] = useState<Partial<Flyer>>({});
+  const [selectedCategories, setSelectedCategories] = useState<Category[]>([Category.ACADEMIC]);
   const [isPosting, setIsPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -66,7 +95,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
     try {
       setStep('processing');
 
-      // 1) Upload to Supabase Storage
+      // Upload to Supabase Storage
       const pdfBytes = await fetch(asset.uri).then(res => res.arrayBuffer());
       const filePath = `flyers/${Date.now()}-${asset.name ?? 'flyer.pdf'}`;
 
@@ -88,9 +117,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       const publicUrl = publicUrlData?.publicUrl;
       setStorageUrl(publicUrl ?? null);
 
-      // Skip AI parsing step — go straight to confirm and let the user fill details.
-      setStorageUrl(publicUrl ?? null);
-      // Pre-fill title from filename (without extension) to help the user
+      // Pre-fill title from filename
       const inferredTitle = (asset.name ?? 'Untitled Event').replace(/\.[^/.]+$/, '');
       setExtractedData({ title: inferredTitle, category: Category.ACADEMIC });
       setStep('confirm');
@@ -102,12 +129,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
     }
   };
 
-// Gemini parsing removed — users will confirm details manually in the confirm step.
-
-
-
-
-
   const isFutureDate = (iso: string | undefined): boolean => {
     if (!iso) return false;
     const d = new Date(iso);
@@ -117,6 +138,22 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
 
   const handleDataChange = (field: keyof Flyer, value: string | Category) => {
     setExtractedData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleToggleCategory = (category: Category) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(category)) {
+        // Remove if already selected (but keep at least one)
+        if (prev.length === 1) {
+          Alert.alert('At least one category', 'Please select at least one category for the event.');
+          return prev;
+        }
+        return prev.filter(c => c !== category);
+      } else {
+        // Add if not selected
+        return [...prev, category];
+      }
+    });
   };
 
   const handleConfirm = () => {
@@ -140,6 +177,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       return;
     }
 
+    if (selectedCategories.length === 0) {
+      Alert.alert(
+        'Missing category',
+        'Please select at least one category for the event.'
+      );
+      return;
+    }
+
     if (!storageUrl) {
       Alert.alert(
         'Missing file',
@@ -154,9 +199,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       id: new Date().toISOString(),
       title: extractedData.title || 'Untitled Event',
       description: extractedData.description || '',
-      imageUrl: storageUrl, // use Supabase URL instead of placeholder
+      imageUrl: storageUrl,
       eventDate: finalEventDate,
-      category: extractedData.category || Category.CLUB,
+      category: selectedCategories[0], // Primary category (first selected)
+      categories: selectedCategories, // All selected categories
       location: extractedData.location || '',
       organization: extractedData.organization || '',
       likes: 0,
@@ -176,17 +222,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
         setFileUri(null);
         setStorageUrl(null);
         setExtractedData({});
+        setSelectedCategories([Category.ACADEMIC]);
         setError(null);
       }, 500);
     }, 2000);
   };
-
-
-
-
-
-  // NOTE: stray Pressable block removed; the real submit button lives in the confirm step below.
-
 
   const renderContent = () => {
     switch(step) {
@@ -206,129 +246,125 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
           <View style={styles.centerContent}>
             <ActivityIndicator size="large" color="#a855f7" />
             <Text style={[styles.title, { marginTop: 24 }]}>Processing...</Text>
-            <Text style={styles.subtitle}>Our AI is reading your flyer.</Text>
+            <Text style={styles.subtitle}>Uploading your flyer.</Text>
             <Text style={styles.fileName}>{fileName}</Text>
           </View>
         );
 
-case 'confirm':
-  return (
-    <ScrollView>
-      <Text style={styles.title}>Confirm Details</Text>
-      <View style={styles.form}>
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          style={styles.input}
-          value={extractedData.title ?? ''}
-          onChangeText={(val) => handleDataChange('title', val)}
-        />
+      case 'confirm':
+        return (
+          <ScrollView>
+            <Text style={styles.title}>Confirm Details</Text>
+            <View style={styles.form}>
+              <Text style={styles.label}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={extractedData.title ?? ''}
+                onChangeText={(val) => handleDataChange('title', val)}
+              />
 
-        <Text style={styles.label}>Organization</Text>
-        <TextInput
-          style={styles.input}
-          value={extractedData.organization ?? ''}
-          onChangeText={(val) => handleDataChange('organization', val)}
-        />
+              <Text style={styles.label}>Organization</Text>
+              <TextInput
+                style={styles.input}
+                value={extractedData.organization ?? ''}
+                onChangeText={(val) => handleDataChange('organization', val)}
+              />
 
-        <Text style={styles.label}>Location</Text>
-        <TextInput
-          style={styles.input}
-          value={extractedData.location ?? ''}
-          onChangeText={(val) => handleDataChange('location', val)}
-        />
+              <Text style={styles.label}>Location</Text>
+              <TextInput
+                style={styles.input}
+                value={extractedData.location ?? ''}
+                onChangeText={(val) => handleDataChange('location', val)}
+              />
 
-        <Text style={styles.label}>Date & Time</Text>
-        {/* Friendly picker UI: show formatted date/time and open platform pickers */}
-        <Pressable
-          onPress={() => {
-            const current = extractedData.eventDate
-              ? new Date(extractedData.eventDate)
-              : new Date();
-            setTempDate(current);
-            // Open date picker first
-            setShowDatePicker(true);
-          }}
-          style={[styles.input, styles.pickerButton]}
-        >
-          <Text style={{ color: extractedData.eventDate ? '#e7e5e4' : '#9ca3af' }}>
-            {extractedData.eventDate
-              ? new Date(extractedData.eventDate).toLocaleString()
-              : 'Select date and time'}
-          </Text>
-        </Pressable>
+              <Text style={styles.label}>Date & Time</Text>
+              <Pressable
+                onPress={() => {
+                  const current = extractedData.eventDate
+                    ? new Date(extractedData.eventDate)
+                    : new Date();
+                  setTempDate(current);
+                  setShowDatePicker(true);
+                }}
+                style={[styles.input, styles.pickerButton]}
+              >
+                <Text style={{ color: extractedData.eventDate ? '#e7e5e4' : '#9ca3af' }}>
+                  {extractedData.eventDate
+                    ? new Date(extractedData.eventDate).toLocaleString()
+                    : 'Select date and time'}
+                </Text>
+              </Pressable>
 
-        {/* Inline date/time pickers (rendered when toggled). On some platforms
-            both date and time modes are available; we show them sequentially. */}
-        {showDatePicker && (
-          <DateTimePicker
-            value={tempDate}
-            mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            onChange={(_event: any, selected?: Date | undefined) => {
-              setShowDatePicker(false);
-              if (selected) {
-                // Keep the selected date and then open the time picker
-                setTempDate(prev => {
-                  const next = new Date(prev);
-                  next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
-                  return next;
-                });
-                // Open time picker next (some platforms combine both; handle gracefully)
-                setTimeout(() => setShowTimePicker(true), 50);
-              }
-            }}
-          />
-        )}
+              {showDatePicker && (
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_event: any, selected?: Date | undefined) => {
+                    setShowDatePicker(false);
+                    if (selected) {
+                      setTempDate(prev => {
+                        const next = new Date(prev);
+                        next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
+                        return next;
+                      });
+                      setTimeout(() => setShowTimePicker(true), 50);
+                    }
+                  }}
+                />
+              )}
 
-        {showTimePicker && (
-          <DateTimePicker
-            value={tempDate}
-            mode="time"
-            is24Hour={false}
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            onChange={(_event: any, selected?: Date | undefined) => {
-              setShowTimePicker(false);
-              if (selected) {
-                // Merge time into tempDate and set as final eventDate
-                const merged = new Date(tempDate);
-                merged.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
-                setExtractedData(prev => ({ ...prev, eventDate: merged.toISOString() }));
-              }
-            }}
-          />
-        )}
+              {showTimePicker && (
+                <DateTimePicker
+                  value={tempDate}
+                  mode="time"
+                  is24Hour={false}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_event: any, selected?: Date | undefined) => {
+                    setShowTimePicker(false);
+                    if (selected) {
+                      const merged = new Date(tempDate);
+                      merged.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                      setExtractedData(prev => ({ ...prev, eventDate: merged.toISOString() }));
+                    }
+                  }}
+                />
+              )}
 
-        {/* Optional inline validation message */}
-        {extractedData.eventDate && !isFutureDate(extractedData.eventDate) && (
-          <Text style={{ color: '#f97373', marginTop: 4, fontSize: 12 }}>
-            Event date must be in the future.
-          </Text>
-        )}
+              {extractedData.eventDate && !isFutureDate(extractedData.eventDate) && (
+                <Text style={{ color: '#f97373', marginTop: 4, fontSize: 12 }}>
+                  Event date must be in the future.
+                </Text>
+              )}
 
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          multiline
-          value={extractedData.description ?? ''}
-          onChangeText={(val) => handleDataChange('description', val)}
-        />
-      </View>
+              <Text style={styles.label}>
+                Categories <Text style={styles.labelSubtext}>(select all that apply)</Text>
+              </Text>
+              <CategorySelector
+                selectedCategories={selectedCategories}
+                onToggleCategory={handleToggleCategory}
+              />
 
-      <Pressable
-        onPress={handleConfirm}
-        style={[styles.button, { marginTop: 32, opacity: isPosting ? 0.7 : 1 }]}
-        disabled={isPosting}
-      >
-        <Text style={styles.buttonText}>
-          {isPosting ? 'Posting...' : 'Looks Good! Post Event'}
-        </Text>
-      </Pressable>
-    </ScrollView>
-  );
-      
-      
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                multiline
+                value={extractedData.description ?? ''}
+                onChangeText={(val) => handleDataChange('description', val)}
+              />
+            </View>
 
-        
+            <Pressable
+              onPress={handleConfirm}
+              style={[styles.button, { marginTop: 32, opacity: isPosting ? 0.7 : 1 }]}
+              disabled={isPosting}
+            >
+              <Text style={styles.buttonText}>
+                {isPosting ? 'Posting...' : 'Looks Good! Post Event'}
+              </Text>
+            </Pressable>
+          </ScrollView>
+        );
 
       case 'success':
         return (
@@ -366,18 +402,20 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     modalContent: {
-        backgroundColor: '#1c1917', // stone-950
+        backgroundColor: '#1c1917',
         borderRadius: 12,
         padding: 24,
         width: '100%',
         maxWidth: 500,
-        borderColor: '#44403c', // stone-700
+        maxHeight: '90%',
+        borderColor: '#44403c',
         borderWidth: 1,
     },
     closeButton: {
         position: 'absolute',
         top: 16,
         right: 16,
+        zIndex: 10,
     },
     centerContent: { alignItems: 'center', justifyContent: 'center' },
     title: { fontSize: 24, fontWeight: 'bold', color: '#f5f5f4', marginBottom: 16 },
@@ -388,8 +426,50 @@ const styles = StyleSheet.create({
     successIconContainer: { backgroundColor: 'rgba(168, 85, 247, 0.1)', borderRadius: 9999, width: 64, height: 64, justifyContent: 'center', alignItems: 'center' },
     form: { gap: 16 },
     label: { color: '#a8a29e', fontWeight: '500', marginBottom: 4 },
+    labelSubtext: { color: '#78716c', fontWeight: '400', fontSize: 12 },
     input: { backgroundColor: '#292524', borderColor: '#44403c', borderWidth: 1, borderRadius: 6, padding: 10, color: '#e7e5e4' },
+    pickerButton: { justifyContent: 'center' },
     textArea: { height: 100, textAlignVertical: 'top' },
+    categoryGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    categoryChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#292524',
+        borderWidth: 1.5,
+        borderColor: '#44403c',
+        gap: 6,
+    },
+    categoryChipSelected: {
+        backgroundColor: 'rgba(168, 85, 247, 0.15)',
+        borderColor: '#a855f7',
+    },
+    categoryChipPressed: {
+        opacity: 0.7,
+    },
+    categoryChipText: {
+        color: '#d6d3d1',
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    categoryChipTextSelected: {
+        color: '#a855f7',
+        fontWeight: '600',
+    },
+    checkmark: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: 'rgba(168, 85, 247, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
 });
 
 export default UploadModal;
