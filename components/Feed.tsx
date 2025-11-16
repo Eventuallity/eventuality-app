@@ -57,7 +57,7 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
             description: 'Flyer uploaded by the community.',
             imageUrl: publicUrl,
             eventDate: new Date(file.updated_at ?? file.created_at ?? Date.now()).toISOString(),
-            category: Category.AD,
+            category: Category.OTHER,
             likes: 0,
             dislikes: 0,
             uploader: { id: 'supabase-storage', name: 'Supabase Storage' },
