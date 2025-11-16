@@ -1,24 +1,23 @@
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { StyleSheet, View as ViewComponent, StatusBar } from 'react-native';
+import { StatusBar, StyleSheet, View as ViewComponent } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import Header from '../../components/Header';
-import Feed from '../../components/Feed';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../auth-context';
 import BottomNav from '../../components/BottomNav';
-import UploadModal from '../../components/UploadModal';
 import Explore from '../../components/Explore';
+import Feed from '../../components/Feed';
+import Header from '../../components/Header';
 import LogoutConfirmModal from '../../components/LogoutConfirmModal';
 import Toast from '../../components/Toast';
-import { Flyer } from '../.././types';
-import { useRouter } from 'expo-router';
-import { useAuth } from '../../auth-context';   // ⬅️ add this line
+import UploadModal from '../../components/UploadModal';
+import { Flyer } from '../../types';
 
 export type ViewType = 'feed' | 'explore';
 
-const router = useRouter();
-
 function App() {
-  const { user, signOut } = useAuth();        // ⬅️ access current user + signOut
+  const router = useRouter();
+  const { user, signOut } = useAuth();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [flyers, setFlyers] = useState<Flyer[]>([]);
@@ -26,6 +25,9 @@ function App() {
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  
+  // Shared state for tracking which events have been added to calendar
+  const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
 
   const handleOpenUpload = () => setIsUploadModalOpen(true);
   const handleCloseUpload = () => setIsUploadModalOpen(false);
@@ -42,7 +44,7 @@ function App() {
 
   const handleConfirmLogout = async () => {
     setIsLogoutModalOpen(false);
-    await signOut();                    // ⬅️ log out from Supabase
+    await signOut();
     showToast('Logged out successfully');
     setTimeout(() => {
       router.replace('/login');
@@ -65,6 +67,18 @@ function App() {
     }
   };
 
+  const handleEventAdded = (flyerId: string) => {
+    setAddedEventIds(prev => new Set(prev).add(flyerId));
+  };
+
+  const handleEventRemoved = (flyerId: string) => {
+    setAddedEventIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(flyerId);
+      return newSet;
+    });
+  };
+
   return (
     <GestureHandlerRootView style={styles.gestureHandler}>
       <SafeAreaView style={styles.safeArea}>
@@ -79,8 +93,23 @@ function App() {
             onSearchTermChange={setSearchTerm}
           />
           <ViewComponent style={styles.main}>
-            {activeView === 'feed' && <Feed initialFlyers={flyers} showToast={showToast} />}
-            {activeView === 'explore' && <Explore searchTerm={searchTerm} />}
+            {activeView === 'feed' && (
+              <Feed 
+                initialFlyers={flyers} 
+                showToast={showToast}
+                addedEventIds={addedEventIds}
+                onEventAdded={handleEventAdded}
+              />
+            )}
+            {activeView === 'explore' && (
+              <Explore 
+                searchTerm={searchTerm} 
+                showToast={showToast}
+                addedEventIds={addedEventIds}
+                onEventAdded={handleEventAdded}
+                onEventRemoved={handleEventRemoved}
+              />
+            )}
           </ViewComponent>
           <BottomNav activeView={activeView} setView={setActiveView} /> 
 
@@ -107,13 +136,13 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    backgroundColor: '#1c1917', // stone-950
+    backgroundColor: '#1c1917',
   },
   container: {
     flex: 1,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: '#292524', // stone-800
+    borderColor: '#292524',
   },
   main: {
     flex: 1,
