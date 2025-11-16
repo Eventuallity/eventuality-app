@@ -1,8 +1,8 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { MOCK_FLYERS } from '../constants';
 import { Category, Flyer } from '../types';
 import { addEventToCalendar } from '../utils/calendar';
+import { supabase } from '../supabase-client';
 import FilterBar from './FilterBar';
 import Icon from './Icon';
 
@@ -104,9 +104,70 @@ const Explore: React.FC<ExploreProps> = ({
   onEventAdded, 
   onEventRemoved 
 }) => {
-  const [flyers] = useState<Flyer[]>(MOCK_FLYERS);
+  const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const fetchStorageFlyers = useCallback(async () => {
+    setIsLoading(true);
+    setErrorText(null);
+    try {
+      const listAll = async (path: string): Promise<{ path: string; name: string; created_at?: string | null; updated_at?: string | null }[]> => {
+        const { data, error } = await supabase.storage
+          .from('flyers')
+          .list(path, { limit: 1000, sortBy: { column: 'name', order: 'asc' } });
+        if (error) throw error;
+
+        const collected: { path: string; name: string; created_at?: string | null; updated_at?: string | null }[] = [];
+        for (const item of data ?? []) {
+          const fullPath = path ? `${path}/${item.name}` : item.name;
+          const isFolder = !item.id && !item.metadata;
+          if (isFolder) {
+            collected.push(...(await listAll(fullPath)));
+          } else {
+            collected.push({ path: fullPath, name: item.name, created_at: item.created_at, updated_at: item.updated_at });
+          }
+        }
+        return collected;
+      };
+
+      const files = await listAll('');
+
+      const mappedFlyers: Flyer[] = files
+        .filter(file => file.name.toLowerCase().endsWith('.pdf'))
+        .map(file => {
+          const { data: publicUrlData } = supabase.storage.from('flyers').getPublicUrl(file.path);
+          const publicUrl = publicUrlData?.publicUrl;
+          if (!publicUrl) return null;
+
+          return {
+            id: file.path,
+            title: file.name.replace(/\.[^/.]+$/, ''),
+            description: 'Flyer uploaded by the community.',
+            imageUrl: publicUrl,
+            eventDate: new Date(file.updated_at ?? file.created_at ?? Date.now()).toISOString(),
+            category: Category.AD,
+            likes: 0,
+            dislikes: 0,
+            uploader: { id: 'supabase-storage', name: 'Supabase Storage' },
+          };
+        })
+        .filter((flyer): flyer is Flyer => Boolean(flyer));
+
+      setFlyers(mappedFlyers);
+    } catch (err) {
+      console.error('Unexpected error loading flyers', err);
+      setErrorText((err as Error)?.message ?? 'Unable to load flyers');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStorageFlyers();
+  }, [fetchStorageFlyers]);
 
   const filteredFlyers = useMemo(() => {
     let result = [...flyers].sort((a, b) => (b.likes - b.dislikes) - (a.likes - a.dislikes));
@@ -153,7 +214,13 @@ const Explore: React.FC<ExploreProps> = ({
         contentContainerStyle={{ paddingHorizontal: 16 }}
         ListEmptyComponent={() => (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No events found.</Text>
+            <Text style={styles.emptyText}>
+              {isLoading
+                ? 'Loading flyers...'
+                : errorText
+                ? errorText
+                : 'No events found.'}
+            </Text>
           </View>
         )}
       />
