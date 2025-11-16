@@ -1,7 +1,9 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, Platform } from 'react-native';
 import { Category, Flyer } from '../types';
+import { useAuth } from '../auth-context';
 import { addEventToCalendar } from '../utils/calendar';
+import { recordCalendarAdd } from '../utils/calendar-add';
 import { supabase } from '../supabase-client';
 import FilterBar from './FilterBar';
 import Icon from './Icon';
@@ -68,6 +70,8 @@ const FlyerListItem: React.FC<{
   isAdded: boolean;
   onToggleAdded: (flyerId: string, newState: boolean) => void;
 }> = ({ flyer, onImageClick, onLongPressShare, onShowToast, isAdded, onToggleAdded }) => {
+  userEmail?: string | null;
+}> = ({ flyer, onImageClick, onShowToast, isAdded, onToggleAdded, userEmail }) => {
   const [addCount, setAddCount] = useState(flyer.likes);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -98,6 +102,10 @@ const FlyerListItem: React.FC<{
       if (success) {
         onToggleAdded(flyer.id, true);
         setAddCount(prev => prev + 1);
+        const inserted = await recordCalendarAdd(userEmail, flyer);
+        if (!inserted) {
+          console.warn('Unable to record calendar add in Supabase');
+        }
         onShowToast('Added to calendar');
       } else {
         onShowToast('Failed to add to calendar');
@@ -163,6 +171,8 @@ const Explore: React.FC<ExploreProps> = ({
   onEventAdded, 
   onEventRemoved 
 }) => {
+  const { user } = useAuth();
+  const userEmail = user?.email ?? null;
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | 'All'>('All');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -314,6 +324,7 @@ const Explore: React.FC<ExploreProps> = ({
             onShowToast={showToast}
             isAdded={addedEventIds.has(item.id)}
             onToggleAdded={handleToggleAdded}
+            userEmail={userEmail}
           />
         )}
         keyExtractor={item => item.id}

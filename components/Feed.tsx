@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Category, Flyer } from '.././types';
+import { useAuth } from '../auth-context';
 import { supabase } from '../supabase-client';
 import { addEventToCalendar } from '../utils/calendar';
+import { recordCalendarAdd } from '../utils/calendar-add';
 import FlyerCard from './FlyerCard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -67,6 +69,7 @@ const resolveUti = (extension: string | null): string | undefined => {
 const sanitizeFileBaseName = (raw: string): string => raw.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'eventuality_flyer';
 
 const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, onEventAdded }) => {
+  const { user } = useAuth();
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [storageFlyers, setStorageFlyers] = useState<Flyer[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -174,6 +177,10 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
       if (success) {
         onEventAdded(currentFlyer.id);
         showToast('Added to calendar');
+        const inserted = await recordCalendarAdd(user?.email, currentFlyer);
+        if (!inserted) {
+          console.warn('Unable to record calendar add in Supabase');
+        }
       } else {
         showToast('Failed to add to calendar');
       }

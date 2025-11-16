@@ -1,23 +1,23 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Category, Flyer } from '.././types';
 import { CATEGORIES } from '.././constants';
-import Icon from './Icon';
-import * as DocumentPicker from 'expo-document-picker';
-import { Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { Category, Flyer } from '.././types';
 import { supabase } from '../supabase-client';
+import Icon from './Icon';
 
 interface UploadModalProps {
   visible: boolean;
@@ -423,7 +423,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
     });
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     setError(null);
 
     const finalEventDate = extractedData.eventDate;
@@ -462,24 +462,52 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
 
     setIsPosting(true);
 
-    const newFlyer: Flyer = {
-      id: new Date().toISOString(),
-      title: extractedData.title || 'Untitled Event',
-      description: extractedData.description || '',
-      imageUrl: storageUrl,
-      eventDate: finalEventDate,
-      category: selectedCategories[0], // Primary category (first selected)
-      categories: selectedCategories, // All selected categories
-      location: extractedData.location || '',
-      organization: extractedData.organization || '',
-      likes: 0,
-      dislikes: 0,
-      uploader: { id: 'currentUser', name: 'Me' },
-    };
+    try {
+      const { data, error } = await supabase
+        .from('upload_pdf')
+        .insert([
+          {
+            title: extractedData.title || 'Untitled Event',
+            organization: extractedData.organization || '',
+            location: extractedData.location || '',
+            date_and_time: finalEventDate,
+            categories: selectedCategories.join(', '),
+            image_url: storageUrl,
+            image_id: storageUrl.split('/').pop() ?? '',
+            description: extractedData.description || '',
+          },
+        ])
+        .select();
 
-    onUploadSuccess(newFlyer);
-    setStep('success');
-    setIsPosting(false);
+      if (error) {
+        throw error;
+      }
+
+      const newFlyer: Flyer = {
+        id: data[0].id.toString(),
+        title: extractedData.title || 'Untitled Event',
+        description: extractedData.description || '',
+        imageUrl: storageUrl,
+        eventDate: finalEventDate,
+        category: selectedCategories[0], // Primary category (first selected)
+        categories: selectedCategories, // All selected categories
+        location: extractedData.location || '',
+        organization: extractedData.organization || '',
+        likes: 0,
+        dislikes: 0,
+        uploader: { id: 'currentUser', name: 'Me' },
+      };
+
+      onUploadSuccess(newFlyer);
+      setStep('success');
+    } catch (err: any) {
+      console.error('Error inserting into Supabase', err);
+      setError(err?.message ?? 'Failed to post event.');
+      Alert.alert('Error', 'There was an issue posting your event. Please try again.');
+    } finally {
+      setIsPosting(false);
+    }
+
     setTimeout(() => {
       onClose();
       // Reset state for next time
