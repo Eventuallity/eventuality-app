@@ -32,7 +32,18 @@ interface UploadModalProps {
 
 type UploadStep = 'select' | 'processing' | 'confirm' | 'success';
 
-// Gemini integration removed — parsing is done manually by user now.
+const resolveCategory = (value: unknown): Category | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const match = (Object.values(Category) as string[]).find(
+    category => category.toLowerCase() === normalized
+  );
+
+  return match ? (match as Category) : undefined;
+};
 
 const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuccess }) => {
   const [step, setStep] = useState<UploadStep>('select');
@@ -45,6 +56,89 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [tempDate, setTempDate] = useState<Date>(new Date());
+
+  const parseFlyerWithGemini = async (publicUrl: string, originalFileName: string | null) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('gemini', {
+        body: {
+          fileUrl: publicUrl,
+          fileName: originalFileName ?? 'EventFlyer.pdf',
+        },
+      });
+
+      if (error) {
+        const context: any = (error as any)?.context;
+        let message = error.message ?? 'Gemini invocation failed';
+
+        if (context) {
+          if (typeof context === 'string') {
+            message = context;
+          } else if (typeof context.error === 'string') {
+            message = context.error;
+          } else if (typeof context.body === 'string') {
+            try {
+              const bodyJson = JSON.parse(context.body);
+              if (typeof bodyJson?.error === 'string') {
+                message = bodyJson.error;
+              }
+            } catch {
+              message = context.body;
+            }
+          } else {
+            try {
+              message = JSON.stringify(context);
+            } catch {
+              // ignore — keep existing message
+            }
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      const parsed = data?.parsed;
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Gemini returned an unexpected response');
+      }
+
+      const result: Partial<Flyer> = {};
+
+      if (typeof parsed.title === 'string' && parsed.title.trim()) {
+        result.title = parsed.title.trim();
+      }
+
+      if (typeof parsed.description === 'string') {
+        result.description = parsed.description.trim();
+      }
+
+      if (typeof parsed.eventDate === 'string' && parsed.eventDate.trim()) {
+        result.eventDate = parsed.eventDate.trim();
+      }
+
+      if (typeof parsed.location === 'string') {
+        result.location = parsed.location.trim();
+      }
+
+      if (typeof parsed.organization === 'string') {
+        result.organization = parsed.organization.trim();
+      }
+
+      const aiCategory = resolveCategory(parsed.category);
+      if (aiCategory) {
+        result.category = aiCategory;
+      }
+
+      return result;
+    } catch (err: any) {
+      console.error('Gemini parsing failed', err);
+      setError(err?.message ?? 'Failed to parse flyer with Gemini');
+      Alert.alert(
+        'Parsing issue',
+        'We could not automatically extract the event details. Please fill them in manually.'
+      );
+      return null;
+    }
+  };
 
   const handleFileSelect = async () => {
     setError(null);
@@ -85,14 +179,23 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
         .from('flyers')
         .getPublicUrl(filePath);
 
-      const publicUrl = publicUrlData?.publicUrl;
-      setStorageUrl(publicUrl ?? null);
+      const publicUrl = publicUrlData?.publicUrl ?? null;
+      setStorageUrl(publicUrl);
 
-      // Skip AI parsing step — go straight to confirm and let the user fill details.
-      setStorageUrl(publicUrl ?? null);
-      // Pre-fill title from filename (without extension) to help the user
       const inferredTitle = (asset.name ?? 'Untitled Event').replace(/\.[^/.]+$/, '');
-      setExtractedData({ title: inferredTitle, category: Category.ACADEMIC });
+
+      let parsedDetails: Partial<Flyer> | null = null;
+      if (publicUrl) {
+        parsedDetails = await parseFlyerWithGemini(publicUrl, asset.name ?? null);
+      }
+
+      const mergedDetails: Partial<Flyer> = {
+        title: inferredTitle,
+        category: Category.ACADEMIC,
+        ...(parsedDetails ?? {}),
+      };
+
+      setExtractedData(mergedDetails);
       setStep('confirm');
     } catch (err: any) {
       console.error('Upload or parsing failed', err);
@@ -206,7 +309,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
           <View style={styles.centerContent}>
             <ActivityIndicator size="large" color="#a855f7" />
             <Text style={[styles.title, { marginTop: 24 }]}>Processing...</Text>
-            <Text style={styles.subtitle}>Our AI is reading your flyer.</Text>
+            <Text style={styles.subtitle}>{"Hang tight, we're extracting the details."}</Text>
             <Text style={styles.fileName}>{fileName}</Text>
           </View>
         );
