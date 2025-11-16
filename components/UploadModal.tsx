@@ -1,5 +1,18 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  Platform,
+} from 'react-native';
+// Platform Date/Time picker (community package). If you don't have it installed,
+// the code gracefully falls back to the existing text input.
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Category, Flyer } from '.././types';
 import Icon from './Icon';
 
@@ -19,9 +32,7 @@ interface UploadModalProps {
 
 type UploadStep = 'select' | 'processing' | 'confirm' | 'success';
 
-const GEMINI_API_KEY = 'key'; // move to env later
-const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent';
+// Gemini integration removed — parsing is done manually by user now.
 
 const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuccess }) => {
   const [step, setStep] = useState<UploadStep>('select');
@@ -31,6 +42,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
   const [extractedData, setExtractedData] = useState<Partial<Flyer>>({});
   const [isPosting, setIsPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(new Date());
 
   const handleFileSelect = async () => {
     setError(null);
@@ -74,13 +88,11 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
       const publicUrl = publicUrlData?.publicUrl;
       setStorageUrl(publicUrl ?? null);
 
-      // 2) Call Gemini to parse PDF
-      if (publicUrl) {
-        await parsePdfWithGemini(publicUrl);
-      } else {
-        throw new Error('Could not get public URL for uploaded file.');
-      }
-
+      // Skip AI parsing step — go straight to confirm and let the user fill details.
+      setStorageUrl(publicUrl ?? null);
+      // Pre-fill title from filename (without extension) to help the user
+      const inferredTitle = (asset.name ?? 'Untitled Event').replace(/\.[^/.]+$/, '');
+      setExtractedData({ title: inferredTitle, category: Category.ACADEMIC });
       setStep('confirm');
     } catch (err: any) {
       console.error('Upload or parsing failed', err);
@@ -90,130 +102,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
     }
   };
 
-  //helper to parse PDF with Gemini API
-
-  const parsePdfWithGemini = async (pdfUrl: string) => {
-    const prompt = `
-You are extracting event details from a university event flyer PDF.
-
-The ONLY source of truth is the text inside the PDF at:
-${pdfUrl}
-
-Use these rules STRICTLY:
-- Use ONLY exact text from the flyer. Do NOT infer or invent missing info.
-- If you are not 100% sure about a field, set it to an empty string "".
-- For organization, use the club/department/host as written (e.g. "Computer Science Club", "Career Center").
-- For location, use building + room or address exactly as written.
-
-For datetime:
-- Use ONLY the date/time written on the flyer.
-- Prefer to normalize it to a standard readable format if possible, using the flyer text:
-  Examples:
-    "11/24/25 7:30 pm"
-    "11/24/2025 19:00"
-    "Nov 24 2025 7:30 pm"
-    "Friday, November 24, 2025 at 7:30 PM"
-- If multiple dates are present (e.g. a series), pick the MAIN event date (the one most emphasized).
-- If you cannot clearly find a date and time, or it looks like a past year that obviously already happened, set datetime to "".
-
-Return ONLY a single JSON object, no extra text, with this EXACT shape:
-{
-  "title": string,
-  "organization": string,
-  "location": string,
-  "datetime": string,
-  "description": string
-}
-
-Where:
-- "title" is the main event title.
-- "organization" is the host/club/department, or "" if unclear.
-- "location" is the venue/building/room/address, or "" if unclear.
-- "datetime" is the date and time as a single human-readable string (examples above), or "" if unclear or clearly in the past.
-- "description" is 1–3 sentences summarizing the event USING ONLY text from the flyer; if not possible, use "".
-
-Examples of valid JSON outputs (no comments):
-
-{"title":"Career Fair 2025","organization":"Career Center","location":"Student Union Ballroom","datetime":"Friday, October 10, 2025 at 2:00 PM","description":"Meet employers hiring for internships and full-time roles."}
-{"title":"Study Night","organization":"","location":"","datetime":"","description":""}
-
-Now output ONLY the JSON object, no explanation, no markdown.
-`;
-
-    const body = {
-      contents: [
-        {
-          parts: [{ text: prompt }],
-        },
-      ],
-    };
-
-    const res = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Gemini error: ${res.status} ${text}`);
-    }
-
-    const json = await res.json();
-
-    const rawText: string | undefined =
-      json?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!rawText) {
-      throw new Error('Gemini returned no content');
-    }
-
-    // Gemini often returns JSON as text; try to parse it
-    let parsed: any;
-    try {
-      const cleaned = rawText
-        .replace(/```json/gi, '')
-        .replace(/```/g, '')
-        .trim();
-      parsed = JSON.parse(cleaned);
-    } catch (e) {
-      console.warn('Failed to parse JSON from Gemini, output:', rawText);
-      throw new Error('Failed to parse Gemini output as JSON');
-    }
-
-    const cleanString = (val: any): string =>
-      typeof val === 'string' ? val.trim() : '';
-
-    let title = cleanString(parsed.title);
-    let organization = cleanString(parsed.organization);
-    let location = cleanString(parsed.location);
-    let datetime = cleanString(parsed.datetime);
-    let description = cleanString(parsed.description);
-
-    let isoEventDate: string | undefined;
-    if (datetime) {
-      const d = new Date(datetime);
-      if (!isNaN(d.getTime())) {
-        isoEventDate = d.toISOString();
-      } else {
-        // If Date can't parse it, treat as unknown
-        datetime = '';
-      }
-    }
-
-    setExtractedData({
-      title,
-      organization,
-      location,
-      description,
-      eventDate: isoEventDate,
-      category: Category.ACADEMIC,
-    });
-  };
-
-//end of helper
+// Gemini parsing removed — users will confirm details manually in the confirm step.
 
 
 
@@ -349,23 +238,66 @@ case 'confirm':
         />
 
         <Text style={styles.label}>Date & Time</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Nov 24 2025 7:30 pm"
-          value={
-            extractedData.eventDate
-              ? new Date(extractedData.eventDate).toLocaleString()
-              : ''
-          }
-          onChangeText={(val) => {
-            const d = new Date(val);
-            if (!isNaN(d.getTime())) {
-              setExtractedData(prev => ({ ...prev, eventDate: d.toISOString() }));
-            } else {
-              setExtractedData(prev => ({ ...prev, eventDate: undefined }));
-            }
+        {/* Friendly picker UI: show formatted date/time and open platform pickers */}
+        <Pressable
+          onPress={() => {
+            const current = extractedData.eventDate
+              ? new Date(extractedData.eventDate)
+              : new Date();
+            setTempDate(current);
+            // Open date picker first
+            setShowDatePicker(true);
           }}
-        />
+          style={[styles.input, styles.pickerButton]}
+        >
+          <Text style={{ color: extractedData.eventDate ? '#e7e5e4' : '#9ca3af' }}>
+            {extractedData.eventDate
+              ? new Date(extractedData.eventDate).toLocaleString()
+              : 'Select date and time'}
+          </Text>
+        </Pressable>
+
+        {/* Inline date/time pickers (rendered when toggled). On some platforms
+            both date and time modes are available; we show them sequentially. */}
+        {showDatePicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(_event: any, selected?: Date | undefined) => {
+              setShowDatePicker(false);
+              if (selected) {
+                // Keep the selected date and then open the time picker
+                setTempDate(prev => {
+                  const next = new Date(prev);
+                  next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
+                  return next;
+                });
+                // Open time picker next (some platforms combine both; handle gracefully)
+                setTimeout(() => setShowTimePicker(true), 50);
+              }
+            }}
+          />
+        )}
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="time"
+            is24Hour={false}
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(_event: any, selected?: Date | undefined) => {
+              setShowTimePicker(false);
+              if (selected) {
+                // Merge time into tempDate and set as final eventDate
+                const merged = new Date(tempDate);
+                merged.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                setExtractedData(prev => ({ ...prev, eventDate: merged.toISOString() }));
+              }
+            }}
+          />
+        )}
+
         {/* Optional inline validation message */}
         {extractedData.eventDate && !isFutureDate(extractedData.eventDate) && (
           <Text style={{ color: '#f97373', marginTop: 4, fontSize: 12 }}>
