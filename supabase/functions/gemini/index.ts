@@ -20,7 +20,8 @@ const DEFAULT_PROMPT = `You are helping populate an event flyer submission form.
   "eventDate": string, // ISO 8601 datetime, include timezone if present
   "location": string,
   "organization": string,
-  "category": string // One of: Academic, Party, Club, Sports, Arts, Ad
+  "category": string, // Primary category, choose the best match from: Academic, Party, Club, Sports, Performances, Food, Social, Other
+  "categories": string[] // Additional categories (1-3 total) using the same list as above, include the primary category as the first item
 }
 Only provide the JSON object with no additional commentary. If information is missing, use an empty string. Infer the best matching category from the list.`;
 

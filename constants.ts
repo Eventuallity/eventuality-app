@@ -73,5 +73,6 @@ export const CATEGORIES: Category[] = [
     Category.SPORTS,
     Category.PERFORMANCES,
     Category.FOOD,
+  Category.SOCIAL,
     Category.OTHER,
 ];

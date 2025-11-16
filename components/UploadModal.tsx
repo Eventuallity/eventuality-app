@@ -26,6 +26,33 @@ interface UploadModalProps {
 
 type UploadStep = 'select' | 'processing' | 'confirm' | 'success';
 
+const normalizeCategoryString = (value: string): string => value.trim().toLowerCase();
+
+const resolveCategory = (value: unknown): Category | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = normalizeCategoryString(value);
+  const match = (Object.values(Category) as string[]).find(
+    category => normalizeCategoryString(category) === normalized
+  );
+
+  return match ? (match as Category) : undefined;
+};
+
+const resolveCategories = (value: unknown): Category[] => {
+  if (Array.isArray(value)) {
+    const resolved = value
+      .map(item => resolveCategory(item))
+      .filter((item): item is Category => Boolean(item));
+    return Array.from(new Set(resolved));
+  }
+
+  const single = resolveCategory(value);
+  return single ? [single] : [];
+};
+
 const CategorySelector: React.FC<{
   selectedCategories: Category[];
   onToggleCategory: (category: Category) => void;
@@ -146,6 +173,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
         result.category = aiCategory;
       }
 
+      const aiCategories = resolveCategories(parsed.categories);
+      if (aiCategories.length) {
+        result.categories = aiCategories;
+        if (!result.category) {
+          result.category = aiCategories[0];
+        }
+      }
+
       return result;
     } catch (err: any) {
       console.error('Gemini parsing failed', err);
@@ -208,13 +243,28 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
         parsedDetails = await parseFlyerWithGemini(publicUrl, asset.name ?? null);
       }
 
+      const primaryCategory = parsedDetails?.category ?? Category.ACADEMIC;
+      const nextCategoriesRaw = (parsedDetails?.categories && parsedDetails.categories.length)
+        ? parsedDetails.categories
+        : [primaryCategory];
+      let nextCategories = Array.from(new Set(nextCategoriesRaw.filter(Boolean))) as Category[];
+      if (!nextCategories.length) {
+        nextCategories = [Category.ACADEMIC];
+      }
+
       const mergedDetails: Partial<Flyer> = {
-        title: inferredTitle,
-        category: Category.ACADEMIC,
         ...(parsedDetails ?? {}),
+        title: parsedDetails?.title ?? inferredTitle,
+        category: nextCategories[0] ?? primaryCategory,
+        categories: nextCategories,
       };
 
+      if (!mergedDetails.description && parsedDetails?.description) {
+        mergedDetails.description = parsedDetails.description;
+      }
+
       setExtractedData(mergedDetails);
+      setSelectedCategories(nextCategories);
       setStep('confirm');
     } catch (err: any) {
       console.error('Upload or parsing failed', err);
@@ -237,17 +287,24 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
 
   const handleToggleCategory = (category: Category) => {
     setSelectedCategories(prev => {
+      let next: Category[];
       if (prev.includes(category)) {
-        // Remove if already selected (but keep at least one)
         if (prev.length === 1) {
           Alert.alert('At least one category', 'Please select at least one category for the event.');
           return prev;
         }
-        return prev.filter(c => c !== category);
+        next = prev.filter(c => c !== category);
       } else {
-        // Add if not selected
-        return [...prev, category];
+        next = [...prev, category];
       }
+
+      setExtractedData(current => ({
+        ...current,
+        categories: next,
+        category: next[0] ?? current?.category,
+      }));
+
+      return next;
     });
   };
 
