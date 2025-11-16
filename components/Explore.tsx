@@ -69,9 +69,8 @@ const FlyerListItem: React.FC<{
   onShowToast: (message: string) => void;
   isAdded: boolean;
   onToggleAdded: (flyerId: string, newState: boolean) => void;
-}> = ({ flyer, onImageClick, onLongPressShare, onShowToast, isAdded, onToggleAdded }) => {
-  userEmail?: string | null;
-}> = ({ flyer, onImageClick, onShowToast, isAdded, onToggleAdded, userEmail }) => {
+}> = ({ flyer, onImageClick, onLongPressShare, onShowToast, isAdded, onToggleAdded, userEmail }) => {
+  //userEmail?: string | null;
   const [addCount, setAddCount] = useState(flyer.likes);
   const [isLoading, setIsLoading] = useState(false);
 
