@@ -1,18 +1,73 @@
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
-import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View, Platform } from 'react-native';
 import { Category, Flyer } from '../types';
 import { addEventToCalendar } from '../utils/calendar';
 import { supabase } from '../supabase-client';
 import FilterBar from './FilterBar';
 import Icon from './Icon';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+
+const SUPPORTED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic', 'heif'];
+
+const extractExtension = (urlOrName: string): string | null => {
+  const cleaned = urlOrName.split('?')[0].split('#')[0];
+  const segment = cleaned.split('/').pop() ?? cleaned;
+  const match = segment.match(/\.([a-zA-Z0-9]+)$/);
+  return match ? match[1].toLowerCase() : null;
+};
+
+const resolveMimeType = (extension: string | null): string => {
+  switch (extension) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'heic':
+      return 'image/heic';
+    case 'heif':
+      return 'image/heif';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
+const resolveUti = (extension: string | null): string | undefined => {
+  if (Platform.OS !== 'ios') return undefined;
+  switch (extension) {
+    case 'pdf':
+      return 'com.adobe.pdf';
+    case 'png':
+      return 'public.png';
+    case 'jpg':
+    case 'jpeg':
+      return 'public.jpeg';
+    case 'webp':
+      return 'org.webmproject.webp';
+    case 'heic':
+      return 'public.heic';
+    case 'heif':
+      return 'public.heif';
+    default:
+      return undefined;
+  }
+};
+
+const sanitizeFileBaseName = (raw: string): string => raw.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'eventuality_flyer';
 
 const FlyerListItem: React.FC<{ 
   flyer: Flyer; 
   onImageClick: (imageUrl: string) => void;
+  onLongPressShare: (flyer: Flyer) => void;
   onShowToast: (message: string) => void;
   isAdded: boolean;
   onToggleAdded: (flyerId: string, newState: boolean) => void;
-}> = ({ flyer, onImageClick, onShowToast, isAdded, onToggleAdded }) => {
+}> = ({ flyer, onImageClick, onLongPressShare, onShowToast, isAdded, onToggleAdded }) => {
   const [addCount, setAddCount] = useState(flyer.likes);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -59,7 +114,11 @@ const FlyerListItem: React.FC<{
 
   return (
     <View style={styles.itemContainer}>
-      <Pressable onPress={() => onImageClick(flyer.imageUrl)}>
+      <Pressable
+        onPress={() => onImageClick(flyer.imageUrl)}
+        onLongPress={() => onLongPressShare(flyer)}
+        delayLongPress={400}
+      >
         <Image source={{ uri: flyer.imageUrl }} style={styles.itemImage} />
       </Pressable>
       <View style={styles.itemDetails}>
@@ -109,6 +168,7 @@ const Explore: React.FC<ExploreProps> = ({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const isSharingRef = useRef(false);
 
   const fetchStorageFlyers = useCallback(async () => {
     setIsLoading(true);
@@ -136,7 +196,10 @@ const Explore: React.FC<ExploreProps> = ({
       const files = await listAll('');
 
       const mappedFlyers: Flyer[] = files
-        .filter(file => file.name.toLowerCase().endsWith('.pdf'))
+        .filter(file => {
+          const ext = extractExtension(file.name);
+          return Boolean(ext && SUPPORTED_EXTENSIONS.includes(ext));
+        })
         .map(file => {
           const { data: publicUrlData } = supabase.storage.from('flyers').getPublicUrl(file.path);
           const publicUrl = publicUrlData?.publicUrl;
@@ -196,6 +259,48 @@ const Explore: React.FC<ExploreProps> = ({
     setSelectedImage(imageUrl);
   };
 
+  const handleShare = useCallback(async (flyer: Flyer) => {
+    if (isSharingRef.current) {
+      return;
+    }
+
+    isSharingRef.current = true;
+    let downloadedUri: string | null = null;
+
+    try {
+      const sharingAvailable = await Sharing.isAvailableAsync();
+      if (!sharingAvailable) {
+        showToast('Sharing is not available on this device');
+        return;
+      }
+
+      const extension = extractExtension(flyer.imageUrl) ?? extractExtension(flyer.id) ?? 'pdf';
+      const mimeType = resolveMimeType(extension);
+      const uti = resolveUti(extension);
+
+      const safeName = sanitizeFileBaseName(flyer.title || 'event-flyer');
+      const downloadTarget = `${FileSystem.cacheDirectory}${safeName}.${extension}`;
+
+      const download = await FileSystem.downloadAsync(flyer.imageUrl, downloadTarget);
+      downloadedUri = download.uri;
+
+      await Sharing.shareAsync(download.uri, {
+        mimeType,
+        dialogTitle: `Share ${flyer.title || 'Event Flyer'}`,
+        UTI: uti,
+        message: `Look at the event I just found in Eventuality! ${flyer.title ? `\n\n${flyer.title}` : ''}`,
+      });
+    } catch (err) {
+      console.error('Failed to share flyer', err);
+      showToast('Unable to share flyer');
+    } finally {
+      isSharingRef.current = false;
+      if (downloadedUri) {
+        await FileSystem.deleteAsync(downloadedUri, { idempotent: true }).catch(() => undefined);
+      }
+    }
+  }, [showToast]);
+
   return (
     <View style={styles.container}>
       <FilterBar selectedCategory={selectedCategory} onSelectCategory={setSelectedCategory} />
@@ -205,6 +310,7 @@ const Explore: React.FC<ExploreProps> = ({
           <FlyerListItem 
             flyer={item} 
             onImageClick={handleImageClick}
+            onLongPressShare={handleShare}
             onShowToast={showToast}
             isAdded={addedEventIds.has(item.id)}
             onToggleAdded={handleToggleAdded}
