@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View as ViewComponent } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,7 @@ import Header from '../../components/Header';
 import LogoutConfirmModal from '../../components/LogoutConfirmModal';
 import Toast from '../../components/Toast';
 import UploadModal from '../../components/UploadModal';
+import { supabase } from '../../supabase-client';
 import { Flyer } from '../../types';
 
 export type ViewType = 'feed' | 'explore';
@@ -78,6 +79,34 @@ function App() {
       return newSet;
     });
   };
+
+  // Re-hydrate added events for the signed-in user so UI persists across sessions
+  useEffect(() => {
+    if (!user?.email) {
+      setAddedEventIds(new Set());
+      return;
+    }
+
+    const loadAddedEvents = async () => {
+      const { data, error } = await supabase
+        .from('calendar_add')
+        .select('image_id')
+        .eq('email', user.email);
+
+      if (error) {
+        console.error('Failed to load calendar additions', error);
+        return;
+      }
+
+      const ids = (data ?? [])
+        .map(row => row.image_id)
+        .filter((id): id is string => Boolean(id));
+
+      setAddedEventIds(new Set(ids));
+    };
+
+    loadAddedEvents();
+  }, [user?.email]);
 
   return (
     <GestureHandlerRootView style={styles.gestureHandler}>

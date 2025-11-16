@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Category, Flyer } from '.././types';
+import { useAuth } from '../auth-context';
 import { supabase } from '../supabase-client';
 import { addEventToCalendar } from '../utils/calendar';
+import { recordCalendarAdd } from '../utils/calendar-add';
 import FlyerCard from './FlyerCard';
 
 interface FeedProps {
@@ -13,6 +15,7 @@ interface FeedProps {
 }
 
 const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, onEventAdded }) => {
+  const { user } = useAuth();
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [storageFlyers, setStorageFlyers] = useState<Flyer[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -116,6 +119,10 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
       if (success) {
         onEventAdded(currentFlyer.id);
         showToast('Added to calendar');
+        const inserted = await recordCalendarAdd(user?.email, currentFlyer);
+        if (!inserted) {
+          console.warn('Unable to record calendar add in Supabase');
+        }
       } else {
         showToast('Failed to add to calendar');
       }
