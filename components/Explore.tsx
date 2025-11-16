@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MOCK_FLYERS } from '../constants';
 import { Category, Flyer } from '../types';
@@ -130,6 +130,11 @@ const Explore: React.FC<ExploreProps> = ({
     }
   };
 
+  const handleImageClick = (imageUrl: string) => {
+    console.log('Image clicked:', imageUrl);
+    setSelectedImage(imageUrl);
+  };
+
   return (
     <View style={styles.container}>
       <FilterBar selectedCategory={selectedCategory} onSelectCategory={setSelectedCategory} />
@@ -138,7 +143,7 @@ const Explore: React.FC<ExploreProps> = ({
         renderItem={({ item }) => (
           <FlyerListItem 
             flyer={item} 
-            onImageClick={setSelectedImage}
+            onImageClick={handleImageClick}
             onShowToast={showToast}
             isAdded={addedEventIds.has(item.id)}
             onToggleAdded={handleToggleAdded}
@@ -153,15 +158,32 @@ const Explore: React.FC<ExploreProps> = ({
         )}
       />
       
-      <Modal visible={!!selectedImage} transparent={true} animationType="fade" onRequestClose={() => setSelectedImage(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setSelectedImage(null)}>
+      <Modal 
+        visible={!!selectedImage} 
+        transparent={true} 
+        animationType="fade" 
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable 
+            style={StyleSheet.absoluteFill} 
+            onPress={() => setSelectedImage(null)} 
+          />
           <View style={styles.modalContent}>
-            <Image source={{ uri: selectedImage || undefined }} style={styles.modalImage} resizeMode="contain" />
+            {selectedImage ? (
+              <Image 
+                source={{ uri: selectedImage }} 
+                style={styles.modalImage} 
+                resizeMode="contain"
+                onError={(error) => console.log('Image load error:', error.nativeEvent)}
+                onLoad={() => console.log('Image loaded successfully')}
+              />
+            ) : null}
             <Pressable onPress={() => setSelectedImage(null)} style={styles.closeButton}>
               <Icon name="x" className="w-6 h-6" color="white" />
             </Pressable>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     </View>
   );
@@ -182,10 +204,10 @@ const styles = StyleSheet.create({
     addedCount: { color: '#a855f7' },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
     emptyText: { color: '#78716c' },
-    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-    modalContent: {},
-    modalImage: { width: '100%', height: '90%', borderRadius: 12 },
-    closeButton: { position: 'absolute', top: -12, right: -12, backgroundColor: 'rgba(41, 37, 36, 0.8)', padding: 8, borderRadius: 9999 },
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.95)', justifyContent: 'center', alignItems: 'center' },
+    modalContent: { width: '90%', height: '70%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+    modalImage: { width: '100%', height: '100%', borderRadius: 12, backgroundColor: '#292524' },
+    closeButton: { position: 'absolute', top: -16, right: -16, backgroundColor: '#292524', padding: 8, borderRadius: 9999, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4, elevation: 5 },
 });
 
 export default Explore;
