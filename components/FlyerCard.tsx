@@ -14,12 +14,13 @@ interface FlyerCardProps {
   flyer: Flyer;
   isActive: boolean;
   onSwipe: (direction: 'right' | 'left') => void;
+  onLongPress: (flyer: Flyer) => void;
 }
 
 const { width: screenWidth } = Dimensions.get('window');
 const SWIPE_THRESHOLD = screenWidth * 0.4;
 
-const FlyerCard: React.FC<FlyerCardProps> = ({ flyer, isActive, onSwipe }) => {
+const FlyerCard: React.FC<FlyerCardProps> = ({ flyer, isActive, onSwipe, onLongPress }) => {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const rotation = useSharedValue(0);
@@ -48,6 +49,17 @@ const FlyerCard: React.FC<FlyerCardProps> = ({ flyer, isActive, onSwipe }) => {
       }
     });
 
+  const longPressGesture = Gesture.LongPress()
+    .minDuration(500)
+    .maxDistance(20)
+    .onEnd((_event, success) => {
+      if (success && isActive) {
+        runOnJS(onLongPress)(flyer);
+      }
+    });
+
+  const composedGesture = Gesture.Simultaneous(gesture, longPressGesture);
+
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
@@ -57,7 +69,7 @@ const FlyerCard: React.FC<FlyerCardProps> = ({ flyer, isActive, onSwipe }) => {
   }));
 
   return (
-    <GestureDetector gesture={gesture}>
+    <GestureDetector gesture={composedGesture}>
       <Animated.View style={[styles.card, animatedStyle]}>
         <Image source={{ uri: flyer.imageUrl }} style={styles.image} resizeMode="cover" />
       </Animated.View>

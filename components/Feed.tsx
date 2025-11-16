@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Category, Flyer } from '.././types';
 import { supabase } from '../supabase-client';
 import { addEventToCalendar } from '../utils/calendar';
 import FlyerCard from './FlyerCard';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 interface FeedProps {
   initialFlyers: Flyer[];
@@ -12,12 +14,65 @@ interface FeedProps {
   onEventAdded: (flyerId: string) => void;
 }
 
+const SUPPORTED_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic', 'heif'];
+
+const extractExtension = (urlOrName: string): string | null => {
+  const cleaned = urlOrName.split('?')[0].split('#')[0];
+  const segment = cleaned.split('/').pop() ?? cleaned;
+  const match = segment.match(/\.([a-zA-Z0-9]+)$/);
+  return match ? match[1].toLowerCase() : null;
+};
+
+const resolveMimeType = (extension: string | null): string => {
+  switch (extension) {
+    case 'pdf':
+      return 'application/pdf';
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'heic':
+      return 'image/heic';
+    case 'heif':
+      return 'image/heif';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
+const resolveUti = (extension: string | null): string | undefined => {
+  if (Platform.OS !== 'ios') return undefined;
+  switch (extension) {
+    case 'pdf':
+      return 'com.adobe.pdf';
+    case 'png':
+      return 'public.png';
+    case 'jpg':
+    case 'jpeg':
+      return 'public.jpeg';
+    case 'webp':
+      return 'org.webmproject.webp';
+    case 'heic':
+      return 'public.heic';
+    case 'heif':
+      return 'public.heif';
+    default:
+      return undefined;
+  }
+};
+
+const sanitizeFileBaseName = (raw: string): string => raw.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'eventuality_flyer';
+
 const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, onEventAdded }) => {
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const [storageFlyers, setStorageFlyers] = useState<Flyer[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const isSharingRef = useRef(false);
 
   const fetchStorageFlyers = useCallback(async () => {
     setIsLoading(true);
@@ -45,7 +100,10 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
       const files = await listAll('');
 
       const mappedFlyers: Flyer[] = files
-        .filter(file => file.name.toLowerCase().endsWith('.pdf'))
+        .filter(file => {
+          const ext = extractExtension(file.name);
+          return Boolean(ext && SUPPORTED_EXTENSIONS.includes(ext));
+        })
         .map(file => {
           const { data: publicUrlData } = supabase.storage.from('flyers').getPublicUrl(file.path);
           const publicUrl = publicUrlData?.publicUrl;
@@ -123,6 +181,48 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
     setCurrentIndex((prevIndex) => (prevIndex + 1) % flyers.length);
   };
 
+  const handleShare = useCallback(async (flyer: Flyer) => {
+    if (isSharingRef.current) {
+      return;
+    }
+
+    isSharingRef.current = true;
+    let downloadedUri: string | null = null;
+
+    try {
+      const sharingAvailable = await Sharing.isAvailableAsync();
+      if (!sharingAvailable) {
+        showToast('Sharing is not available on this device');
+        return;
+      }
+
+      const extension = extractExtension(flyer.imageUrl) ?? extractExtension(flyer.id) ?? 'pdf';
+      const mimeType = resolveMimeType(extension);
+      const uti = resolveUti(extension);
+
+      const safeName = sanitizeFileBaseName(flyer.title || 'event-flyer');
+      const downloadTarget = `${FileSystem.cacheDirectory}${safeName}.${extension}`;
+
+      const download = await FileSystem.downloadAsync(flyer.imageUrl, downloadTarget);
+      downloadedUri = download.uri;
+
+      await Sharing.shareAsync(download.uri, {
+        mimeType,
+        dialogTitle: `Share ${flyer.title || 'Event Flyer'}`,
+        UTI: uti,
+        message: `Look at the event I just found in Eventuality! ${flyer.title ? `\n\n${flyer.title}` : ''}`,
+      });
+    } catch (err) {
+      console.error('Failed to share flyer', err);
+      showToast('Unable to share flyer');
+    } finally {
+      isSharingRef.current = false;
+      if (downloadedUri) {
+        await FileSystem.deleteAsync(downloadedUri, { idempotent: true }).catch(() => undefined);
+      }
+    }
+  }, [showToast]);
+
   if (flyers.length === 0) {
     return (
       <View style={styles.loadingContainer}>
@@ -144,6 +244,7 @@ const Feed: React.FC<FeedProps> = ({ initialFlyers, showToast, addedEventIds, on
               flyer={flyer}
               isActive={index === currentIndex}
               onSwipe={handleSwipe}
+              onLongPress={handleShare}
             />
           );
         }).reverse()}
