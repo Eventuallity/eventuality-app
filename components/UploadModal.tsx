@@ -1,7 +1,28 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, Pressable, StyleSheet, TextInput, ScrollView, ActivityIndicator } from 'react-native';
-import { Flyer, Category } from '.././types';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  Platform,
+} from 'react-native';
+// Platform Date/Time picker (community package). If you don't have it installed,
+// the code gracefully falls back to the existing text input.
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Category, Flyer } from '.././types';
 import Icon from './Icon';
+
+import * as DocumentPicker from 'expo-document-picker';
+import { Alert } from 'react-native';
+import { supabase } from '../supabase-client';
+
+
+
+
 
 interface UploadModalProps {
   visible: boolean;
@@ -11,28 +32,87 @@ interface UploadModalProps {
 
 type UploadStep = 'select' | 'processing' | 'confirm' | 'success';
 
+// Gemini integration removed — parsing is done manually by user now.
+
 const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuccess }) => {
   const [step, setStep] = useState<UploadStep>('select');
   const [fileName, setFileName] = useState<string | null>(null);
+  const [fileUri, setFileUri] = useState<string | null>(null);
+  const [storageUrl, setStorageUrl] = useState<string | null>(null);
   const [extractedData, setExtractedData] = useState<Partial<Flyer>>({});
+  const [isPosting, setIsPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(new Date());
 
-  const handleFileSelect = () => {
-    // In React Native, we'd use a library like react-native-document-picker
-    // Here we simulate the process.
-    setFileName('flyer-image.jpg');
-    setStep('processing');
-    
-    setTimeout(() => {
-      setExtractedData({
-        title: 'Mock: AI-Extracted Title',
-        description: 'This is a mock description extracted by an AI from the uploaded flyer.',
-        eventDate: '2024-11-15T20:00:00.000Z',
-        category: Category.ACADEMIC,
-        location: 'Student Union Building, Room 201',
-        organization: 'Engineering Society',
-      });
+  const handleFileSelect = async () => {
+    setError(null);
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf'],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    setFileName(asset.name ?? 'flyer.pdf');
+    setFileUri(asset.uri);
+
+    try {
+      setStep('processing');
+
+      // 1) Upload to Supabase Storage
+      const pdfBytes = await fetch(asset.uri).then(res => res.arrayBuffer());
+      const filePath = `flyers/${Date.now()}-${asset.name ?? 'flyer.pdf'}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('flyers')
+        .upload(filePath, pdfBytes, {
+          contentType: 'application/pdf',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('flyers')
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicUrlData?.publicUrl;
+      setStorageUrl(publicUrl ?? null);
+
+      // Skip AI parsing step — go straight to confirm and let the user fill details.
+      setStorageUrl(publicUrl ?? null);
+      // Pre-fill title from filename (without extension) to help the user
+      const inferredTitle = (asset.name ?? 'Untitled Event').replace(/\.[^/.]+$/, '');
+      setExtractedData({ title: inferredTitle, category: Category.ACADEMIC });
       setStep('confirm');
-    }, 2500);
+    } catch (err: any) {
+      console.error('Upload or parsing failed', err);
+      setError(err?.message ?? 'Failed to upload or parse flyer');
+      Alert.alert('Upload error', err?.message ?? 'Failed to upload or parse flyer');
+      setStep('select');
+    }
+  };
+
+// Gemini parsing removed — users will confirm details manually in the confirm step.
+
+
+
+
+
+  const isFutureDate = (iso: string | undefined): boolean => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return false;
+    return d.getTime() > Date.now();
   };
 
   const handleDataChange = (field: keyof Flyer, value: string | Category) => {
@@ -40,27 +120,73 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
   };
 
   const handleConfirm = () => {
+    setError(null);
+
+    const finalEventDate = extractedData.eventDate;
+
+    if (!finalEventDate) {
+      Alert.alert(
+        'Missing event date',
+        'Please provide a valid event date and time before posting.'
+      );
+      return;
+    }
+
+    if (!isFutureDate(finalEventDate)) {
+      Alert.alert(
+        'Invalid event date',
+        'The event date and time must be in the future. Please correct it before posting.'
+      );
+      return;
+    }
+
+    if (!storageUrl) {
+      Alert.alert(
+        'Missing file',
+        'Please upload the flyer again; we could not find the storage URL.'
+      );
+      return;
+    }
+
+    setIsPosting(true);
+
     const newFlyer: Flyer = {
       id: new Date().toISOString(),
       title: extractedData.title || 'Untitled Event',
       description: extractedData.description || '',
-      imageUrl: 'https://picsum.photos/seed/newevent/500/800',
-      eventDate: extractedData.eventDate || new Date().toISOString(),
+      imageUrl: storageUrl, // use Supabase URL instead of placeholder
+      eventDate: finalEventDate,
       category: extractedData.category || Category.CLUB,
       location: extractedData.location || '',
       organization: extractedData.organization || '',
       likes: 0,
       dislikes: 0,
-      uploader: { id: 'currentUser', name: 'Me' }
+      uploader: { id: 'currentUser', name: 'Me' },
     };
+
     onUploadSuccess(newFlyer);
     setStep('success');
+    setIsPosting(false);
     setTimeout(() => {
-        onClose();
-        // Reset state for next time
-        setTimeout(() => setStep('select'), 500);
+      onClose();
+      // Reset state for next time
+      setTimeout(() => {
+        setStep('select');
+        setFileName(null);
+        setFileUri(null);
+        setStorageUrl(null);
+        setExtractedData({});
+        setError(null);
+      }, 500);
     }, 2000);
   };
+
+
+
+
+
+  // NOTE: stray Pressable block removed; the real submit button lives in the confirm step below.
+
 
   const renderContent = () => {
     switch(step) {
@@ -84,27 +210,126 @@ const UploadModal: React.FC<UploadModalProps> = ({ visible, onClose, onUploadSuc
             <Text style={styles.fileName}>{fileName}</Text>
           </View>
         );
-      case 'confirm':
-        return (
-          <ScrollView>
-            <Text style={styles.title}>Confirm Details</Text>
-            <View style={styles.form}>
-                <Text style={styles.label}>Title</Text>
-                <TextInput style={styles.input} value={extractedData.title} onChangeText={(val) => handleDataChange('title', val)} />
-                <Text style={styles.label}>Organization</Text>
-                <TextInput style={styles.input} value={extractedData.organization} onChangeText={(val) => handleDataChange('organization', val)} />
-                <Text style={styles.label}>Location</Text>
-                <TextInput style={styles.input} value={extractedData.location} onChangeText={(val) => handleDataChange('location', val)} />
-                <Text style={styles.label}>Date</Text>
-                <TextInput style={styles.input} value={extractedData.eventDate?.substring(0, 16)} onChangeText={(val) => handleDataChange('eventDate', new Date(val).toISOString())} />
-                <Text style={styles.label}>Description</Text>
-                <TextInput style={[styles.input, styles.textArea]} multiline value={extractedData.description} onChangeText={(val) => handleDataChange('description', val)} />
-            </View>
-            <Pressable onPress={handleConfirm} style={[styles.button, { marginTop: 32 }]}>
-              <Text style={styles.buttonText}>Looks Good! Post Event</Text>
-            </Pressable>
-          </ScrollView>
-        );
+
+case 'confirm':
+  return (
+    <ScrollView>
+      <Text style={styles.title}>Confirm Details</Text>
+      <View style={styles.form}>
+        <Text style={styles.label}>Title</Text>
+        <TextInput
+          style={styles.input}
+          value={extractedData.title ?? ''}
+          onChangeText={(val) => handleDataChange('title', val)}
+        />
+
+        <Text style={styles.label}>Organization</Text>
+        <TextInput
+          style={styles.input}
+          value={extractedData.organization ?? ''}
+          onChangeText={(val) => handleDataChange('organization', val)}
+        />
+
+        <Text style={styles.label}>Location</Text>
+        <TextInput
+          style={styles.input}
+          value={extractedData.location ?? ''}
+          onChangeText={(val) => handleDataChange('location', val)}
+        />
+
+        <Text style={styles.label}>Date & Time</Text>
+        {/* Friendly picker UI: show formatted date/time and open platform pickers */}
+        <Pressable
+          onPress={() => {
+            const current = extractedData.eventDate
+              ? new Date(extractedData.eventDate)
+              : new Date();
+            setTempDate(current);
+            // Open date picker first
+            setShowDatePicker(true);
+          }}
+          style={[styles.input, styles.pickerButton]}
+        >
+          <Text style={{ color: extractedData.eventDate ? '#e7e5e4' : '#9ca3af' }}>
+            {extractedData.eventDate
+              ? new Date(extractedData.eventDate).toLocaleString()
+              : 'Select date and time'}
+          </Text>
+        </Pressable>
+
+        {/* Inline date/time pickers (rendered when toggled). On some platforms
+            both date and time modes are available; we show them sequentially. */}
+        {showDatePicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(_event: any, selected?: Date | undefined) => {
+              setShowDatePicker(false);
+              if (selected) {
+                // Keep the selected date and then open the time picker
+                setTempDate(prev => {
+                  const next = new Date(prev);
+                  next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
+                  return next;
+                });
+                // Open time picker next (some platforms combine both; handle gracefully)
+                setTimeout(() => setShowTimePicker(true), 50);
+              }
+            }}
+          />
+        )}
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={tempDate}
+            mode="time"
+            is24Hour={false}
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(_event: any, selected?: Date | undefined) => {
+              setShowTimePicker(false);
+              if (selected) {
+                // Merge time into tempDate and set as final eventDate
+                const merged = new Date(tempDate);
+                merged.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                setExtractedData(prev => ({ ...prev, eventDate: merged.toISOString() }));
+              }
+            }}
+          />
+        )}
+
+        {/* Optional inline validation message */}
+        {extractedData.eventDate && !isFutureDate(extractedData.eventDate) && (
+          <Text style={{ color: '#f97373', marginTop: 4, fontSize: 12 }}>
+            Event date must be in the future.
+          </Text>
+        )}
+
+        <Text style={styles.label}>Description</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          multiline
+          value={extractedData.description ?? ''}
+          onChangeText={(val) => handleDataChange('description', val)}
+        />
+      </View>
+
+      <Pressable
+        onPress={handleConfirm}
+        style={[styles.button, { marginTop: 32, opacity: isPosting ? 0.7 : 1 }]}
+        disabled={isPosting}
+      >
+        <Text style={styles.buttonText}>
+          {isPosting ? 'Posting...' : 'Looks Good! Post Event'}
+        </Text>
+      </Pressable>
+    </ScrollView>
+  );
+      
+      
+
+        
+
       case 'success':
         return (
           <View style={styles.centerContent}>
