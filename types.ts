@@ -4,8 +4,10 @@ export enum Category {
   PARTY = 'Party',
   CLUB = 'Club',
   SPORTS = 'Sports',
-  ARTS = 'Arts',
-  AD = 'Ad'
+  PERFORMANCES = 'Performances',
+  FOOD = 'Food',
+  SOCIAL = 'Social',
+  OTHER = 'Other',
 }
 
 export interface User {
@@ -21,6 +23,7 @@ export interface Flyer {
   imageUrl: string;
   eventDate: string;
   category: Category;
+  categories: Category[];
   likes: number;
   dislikes: number;
   uploader: User;
